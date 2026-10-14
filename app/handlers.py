@@ -114,7 +114,7 @@ async def panel_add_birthday(message: Message, state: FSMContext, db: Database) 
     await state.clear()
     await state.set_state(AddBirthday.photo)
     await message.answer(
-        "Шаг 1 из 5. Пришлите фотографию именинника.", reply_markup=cancel_keyboard()
+        "📷 <b>Шаг 1 из 5.</b> Пришлите фотографию именинника.", reply_markup=cancel_keyboard()
     )
 
 
@@ -157,7 +157,7 @@ async def add_birthday_start(callback: CallbackQuery, state: FSMContext, db: Dat
     await state.set_state(AddBirthday.photo)
     await callback.answer()
     await callback.message.answer(
-        "Шаг 1 из 5. Пришлите фотографию именинника.", reply_markup=cancel_keyboard()
+        "📷 <b>Шаг 1 из 5.</b> Пришлите фотографию именинника.", reply_markup=cancel_keyboard()
     )
 
 
@@ -167,7 +167,7 @@ async def add_birthday_photo(message: Message, state: FSMContext, bot: Bot, conf
     await bot.download(message.photo[-1], destination=destination)
     await state.update_data(photo_path=str(destination), photo_file_id=message.photo[-1].file_id)
     await state.set_state(AddBirthday.name)
-    await message.answer("Шаг 2 из 5. Введите имя и фамилию.", reply_markup=cancel_keyboard())
+    await message.answer("👤 <b>Шаг 2 из 5.</b> Введите имя и фамилию.", reply_markup=cancel_keyboard())
 
 
 @router.message(AddBirthday.photo)
@@ -184,7 +184,7 @@ async def add_birthday_name(message: Message, state: FSMContext) -> None:
     await state.update_data(name=value)
     await state.set_state(AddBirthday.birth_date)
     await message.answer(
-        "Шаг 3 из 5. Введите дату рождения: <b>ДД.ММ</b> или <b>ДД.ММ.ГГГГ</b>.\n"
+        "📅 <b>Шаг 3 из 5.</b> Введите дату рождения: <b>15.10</b> или <b>15-10</b>.\n"
         "Год можно не указывать — поздравление всё равно повторяется ежегодно.",
         reply_markup=cancel_keyboard(),
     )
@@ -199,7 +199,7 @@ async def add_birthday_date(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(birth_date=parsed.isoformat())
     await state.set_state(AddBirthday.position)
-    await message.answer("Шаг 4 из 5. Введите должность или специализацию.", reply_markup=cancel_keyboard())
+    await message.answer("💼 <b>Шаг 4 из 5.</b> Введите должность или специализацию.", reply_markup=cancel_keyboard())
 
 
 @router.message(AddBirthday.position, F.text)
@@ -212,7 +212,7 @@ async def add_birthday_position(message: Message, state: FSMContext, db: Databas
     await state.set_state(AddBirthday.branch)
     branches = await db.list_branches()
     await message.answer(
-        "Шаг 5 из 5. Выберите филиал:",
+        "🏢 <b>Шаг 5 из 5.</b> Выберите филиал:",
         reply_markup=branch_picker(branches, "addbranch"),
     )
 
@@ -329,7 +329,7 @@ async def birthday_edit_field(callback: CallbackQuery, state: FSMContext, db: Da
     prompts = {
         "photo": "Пришлите новое фото.",
         "name": "Введите новое имя и фамилию.",
-        "birth_date": "Введите новую дату в формате ДД.ММ или ДД.ММ.ГГГГ.",
+        "birth_date": "📅 Введите новую дату, например <b>15.10</b> или <b>15-10</b>.",
         "position": "Введите новую должность или специализацию.",
     }
     if field not in prompts:
@@ -658,8 +658,8 @@ async def settings_caption_start(callback: CallbackQuery, state: FSMContext, db:
     await state.set_state(SettingValue.caption)
     await callback.answer()
     await callback.message.answer(
-        "Отправьте новый текст поздравления. Доступны переменные: "
-        "<code>{name}</code>, <code>{position}</code>, <code>{branch}</code>, <code>{date}</code>.\n\n"
+        "Отправьте новый текст поздравления. Доступные поля: "
+        "<code>[ФИО]</code>, <code>[Должность]</code>, <code>[Филиал]</code>, <code>[Дата]</code>.\n\n"
         f"<b>Текущий шаблон:</b>\n{html.escape(current)}",
         reply_markup=cancel_keyboard(),
     )
@@ -675,7 +675,7 @@ async def settings_caption_finish(message: Message, state: FSMContext, db: Datab
     sample = {
         "name": "Анна Иванова",
         "position": "специалист",
-        "branch_name": "Главный филиал",
+        "branch_name": "Головной (Ташкент)",
         "birth_date": "2000-01-01",
     }
     try:
@@ -699,8 +699,8 @@ async def settings_group_caption_start(
     await state.set_state(SettingValue.group_caption)
     await callback.answer()
     await callback.message.answer(
-        "Отправьте общий текст для 2–9 именинников. Обязательная переменная: "
-        "<code>{people}</code>; также доступна <code>{count}</code>.\n\n"
+        "Отправьте общий текст для 2–9 именинников. Обязательное поле: "
+        "<code>[Список]</code>; также доступно <code>[Количество]</code>.\n\n"
         f"<b>Текущий шаблон:</b>\n{html.escape(current)}",
         reply_markup=cancel_keyboard(),
     )

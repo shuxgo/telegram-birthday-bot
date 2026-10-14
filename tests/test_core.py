@@ -27,6 +27,11 @@ class DateTests(unittest.TestCase):
     def test_full_birth_date(self) -> None:
         self.assertEqual(parse_birth_date("7-4-1995").isoformat(), "1995-04-07")
 
+    def test_common_birth_date_formats(self) -> None:
+        self.assertEqual(parse_birth_date("15/10").isoformat(), "2000-10-15")
+        self.assertEqual(parse_birth_date("15 10 95").isoformat(), "1995-10-15")
+        self.assertEqual(parse_birth_date("1995-10-15").isoformat(), "1995-10-15")
+
     def test_invalid_birth_date(self) -> None:
         with self.assertRaises(ValueError):
             parse_birth_date("31.02")
@@ -44,7 +49,7 @@ class DateTests(unittest.TestCase):
 class CaptionTests(unittest.TestCase):
     def test_values_are_html_escaped(self) -> None:
         caption = render_caption(
-            "{name} / {position} / {branch} / {date}",
+            "[ФИО] / [Должность] / [Филиал] / [Дата]",
             {
                 "name": "A < B",
                 "position": "R&D",
@@ -72,13 +77,15 @@ class CaptionTests(unittest.TestCase):
             {
                 "name": f"Сотрудник {index}",
                 "position": "ведущий специалист",
-                "branch_name": "Главный филиал",
+                "branch_name": "Головной (Ташкент)",
                 "birth_date": "2000-01-02",
             }
             for index in range(1, 10)
         ]
         caption = render_group_caption(DEFAULT_GROUP_CAPTION, rows)
-        self.assertIn("9. <b>Сотрудник 9</b>", caption)
+        self.assertIn("<b>Сотрудник 9</b>", caption)
+        self.assertNotIn("1. <b>", caption)
+        self.assertIn(" и <b>Сотрудник 9</b>", caption)
         self.assertLessEqual(len(caption), 1000)
 
 
@@ -116,6 +123,16 @@ class KeyboardTests(unittest.TestCase):
 
 
 class DatabaseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_all_default_branches_are_created(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            overlay = ensure_default_template(root / "overlay.png")
+            db = Database(root / "test.sqlite3")
+            await db.initialize(overlay)
+            branches = await db.list_branches()
+            self.assertEqual(len(branches), 44)
+            self.assertIn("Головной (Ташкент)", {row["name"] for row in branches})
+
     async def test_moderator_access_can_be_added_and_removed(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

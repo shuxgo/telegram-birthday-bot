@@ -9,6 +9,17 @@ import aiosqlite
 
 from .utils import DEFAULT_CAPTION, DEFAULT_GROUP_CAPTION
 
+DEFAULT_BRANCHES = (
+    "Головной (Ташкент)", "Алмалык", "Янги Хаёт", "Бука", "Ангрен",
+    "Янгиюль", "Юнусабад", "Гулистан", "Ахангаран", "Бекабад",
+    "Янгибозор", "Навои", "Сырдарья", "Ургенч", "Бухара", "Чирчик",
+    "Зарафшан", "Авиасозлар", "Жондор", "Каган", "Нукус", "Учкудук",
+    "Ромитан", "Янгийер", "Зафар", "Гиждувон", "Газалкент", "Паркент",
+    "Ургут", "Пахтачи", "Бувайда", "Каттакурган", "Мангыт", "ТТЗ",
+    "Джизак", "Гурлен", "Шават", "Сергели", "Фергана", "Андижан",
+    "Коканд", "Термез", "Шахрихон", "Алмазар",
+)
+
 
 class Database:
     def __init__(self, path: Path) -> None:
@@ -91,7 +102,24 @@ class Database:
                 "UPDATE settings SET value = ? WHERE key = 'caption_template'",
                 (DEFAULT_CAPTION,),
             )
-            await db.execute("INSERT OR IGNORE INTO branches(name) VALUES (?)", ("Главный филиал",))
+            await db.execute(
+                "UPDATE settings SET value = ? WHERE key = 'group_caption_template'",
+                (DEFAULT_GROUP_CAPTION,),
+            )
+            await db.executemany(
+                "INSERT OR IGNORE INTO branches(name) VALUES (?)",
+                ((name,) for name in DEFAULT_BRANCHES),
+            )
+            await db.execute(
+                "UPDATE birthdays SET branch_id = (SELECT id FROM branches WHERE name = ?) "
+                "WHERE branch_id IN (SELECT id FROM branches WHERE name = ?)",
+                ("Головной (Ташкент)", "Главный филиал"),
+            )
+            await db.execute(
+                "DELETE FROM branches WHERE name = ? AND NOT EXISTS "
+                "(SELECT 1 FROM birthdays WHERE birthdays.branch_id = branches.id)",
+                ("Главный филиал",),
+            )
             await db.commit()
 
     async def is_moderator(self, user_id: int) -> bool:

@@ -52,9 +52,8 @@ const MONTHS = [
 ];
 
 const DEFAULT_GROUP_CAPTION =
-  "🎉 <b>Поздравляем наших именинников!</b>\n\n" +
-  "Сегодня день рождения отмечают:\n\n{people}\n\n" +
-  "Желаем крепкого здоровья, счастья, вдохновения и ярких профессиональных побед! 🎂";
+  "🎉 Поздравляем с днём рождения [Список]!\n\n" +
+  "Желаем крепкого здоровья, благополучия, вдохновения и новых успехов! 💙";
 
 function panelKeyboard(owner = false): ReplyKeyboard {
   return {
@@ -213,12 +212,14 @@ async function clearSession(env: Env, adminId: number): Promise<void> {
 }
 
 function parseDate(input: string): string | null {
-  const match = input.trim().replaceAll("/", ".").replaceAll("-", ".")
-    .match(/^(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?$/);
-  if (!match) return null;
-  const day = Number(match[1]);
-  const month = Number(match[2]);
-  const year = Number(match[3] ?? 2000);
+  const value = input.trim();
+  const iso = value.match(/^(\d{4})[\s./\\_-]+(\d{1,2})[\s./\\_-]+(\d{1,2})$/);
+  const usual = value.match(/^(\d{1,2})[\s./\\_-]+(\d{1,2})(?:[\s./\\_-]+(\d{2}|\d{4}))?$/);
+  if (!iso && !usual) return null;
+  const day = Number(iso?.[3] ?? usual?.[1]);
+  const month = Number(iso?.[2] ?? usual?.[2]);
+  let year = Number(iso?.[1] ?? usual?.[3] ?? 2000);
+  if (!iso && usual?.[3]?.length === 2) year += year < 50 ? 2000 : 1900;
   const date = new Date(Date.UTC(year, month - 1, day));
   if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
   return `${year.toString().padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
@@ -231,10 +232,10 @@ function displayDate(iso: string): string {
 
 function renderCaption(template: string, row: Row): string {
   return template.replaceAll("\\n", "\n")
-    .replaceAll("{name}", html(row.name))
-    .replaceAll("{position}", html(row.position))
-    .replaceAll("{branch}", html(row.branch_name))
-    .replaceAll("{date}", displayDate(String(row.birth_date)));
+    .replaceAll("[ФИО]", html(row.name)).replaceAll("{name}", html(row.name))
+    .replaceAll("[Должность]", html(row.position)).replaceAll("{position}", html(row.position))
+    .replaceAll("[Филиал]", html(row.branch_name)).replaceAll("{branch}", html(row.branch_name))
+    .replaceAll("[Дата]", displayDate(String(row.birth_date))).replaceAll("{date}", displayDate(String(row.birth_date)));
 }
 
 function compact(value: unknown, limit: number): string {
@@ -242,19 +243,29 @@ function compact(value: unknown, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;
 }
 
+function hasUnknownPlaceholders(text: string, allowedSquare: Set<string>, allowedCurly: Set<string>): boolean {
+  const square = [...text.matchAll(/\[([^\[\]]+)\]/g)].map((match) => match[1]);
+  const curly = [...text.matchAll(/\{([^{}]+)\}/g)].map((match) => match[1]);
+  return square.some((name) => !allowedSquare.has(name)) || curly.some((name) => !allowedCurly.has(name));
+}
+
 function renderGroupCaption(template: string, rows: Row[]): string {
-  const people = rows.map((row, index) => (
-    `${index + 1}. <b>${html(compact(row.name, 36))}</b> — ` +
-    `${html(compact(row.position, 28))} · ${html(compact(row.branch_name, 22))}`
-  )).join("\n");
+  const entries = rows.map((row) => (
+    `<b>${html(compact(row.name, 36))}</b> ` +
+    `(${html(compact(row.position, 28))}, филиал «${html(compact(row.branch_name, 22))}»)`
+  ));
+  const people = entries.length === 1 ? entries[0]
+    : entries.length === 2 ? entries.join(" и ")
+      : `${entries.slice(0, -1).join(", ")} и ${entries.at(-1)}`;
   let caption = template.replaceAll("\\n", "\n")
-    .replaceAll("{people}", people)
-    .replaceAll("{count}", String(rows.length));
+    .replaceAll("[Список]", people).replaceAll("{people}", people)
+    .replaceAll("[Количество]", String(rows.length)).replaceAll("{count}", String(rows.length));
   if (caption.length <= 1000) return caption;
 
-  const namesOnly = rows.map((row, index) => `${index + 1}. <b>${html(compact(row.name, 55))}</b>`).join("\n");
-  caption = `🎉 <b>Поздравляем наших именинников!</b>\n\n${namesOnly}\n\n` +
-    "Желаем здоровья, счастья, вдохновения и ярких профессиональных побед! 🎂";
+  const names = rows.map((row) => `<b>${html(compact(row.name, 55))}</b>`);
+  const namesOnly = names.length === 2 ? names.join(" и ") : `${names.slice(0, -1).join(", ")} и ${names.at(-1)}`;
+  caption = `🎉 Поздравляем с днём рождения ${namesOnly}!\n\n` +
+    "Желаем здоровья, благополучия, вдохновения и новых успехов! 💙";
   return caption;
 }
 
@@ -373,26 +384,26 @@ async function handleStateMessage(env: Env, message: TgMessage, state: { state: 
     const key = `photos/${crypto.randomUUID()}.jpg`;
     await env.MEDIA.put(key, bytes);
     await next("add_name", { photo_key: key, photo_file_id: photo.file_id });
-    await sendMessage(env, chatId, "Шаг 2 из 5. Введите имя и фамилию.", cancelKeyboard);
+    await sendMessage(env, chatId, "👤 <b>Шаг 2 из 5.</b> Введите имя и фамилию.", cancelKeyboard);
     return true;
   }
   if (state.state === "add_name") {
     if (!text || text.length < 2 || text.length > 120) { await sendMessage(env, chatId, "Введите имя длиной от 2 до 120 символов."); return true; }
     await next("add_date", { ...state.data, name: text });
-    await sendMessage(env, chatId, "Шаг 3 из 5. Введите дату: <b>ДД.ММ</b> или <b>ДД.ММ.ГГГГ</b>.", cancelKeyboard);
+    await sendMessage(env, chatId, "📅 <b>Шаг 3 из 5.</b> Введите дату рождения: <b>15.10</b> или <b>15-10</b>. Год можно добавить при желании.", cancelKeyboard);
     return true;
   }
   if (state.state === "add_date") {
     const date = text ? parseDate(text) : null;
-    if (!date) { await sendMessage(env, chatId, "Некорректная дата. Используйте ДД.ММ или ДД.ММ.ГГГГ."); return true; }
+    if (!date) { await sendMessage(env, chatId, "Некорректная дата. Введите, например, 15.10 или 15-10."); return true; }
     await next("add_position", { ...state.data, birth_date: date });
-    await sendMessage(env, chatId, "Шаг 4 из 5. Введите должность или специализацию.", cancelKeyboard);
+    await sendMessage(env, chatId, "💼 <b>Шаг 4 из 5.</b> Введите должность или специализацию.", cancelKeyboard);
     return true;
   }
   if (state.state === "add_position") {
     if (!text || text.length < 2 || text.length > 160) { await sendMessage(env, chatId, "Введите должность длиной от 2 до 160 символов."); return true; }
     await next("add_branch", { ...state.data, position: text });
-    await sendMessage(env, chatId, "Шаг 5 из 5. Выберите филиал:", await branchKeyboard(env, "addbranch"));
+    await sendMessage(env, chatId, "🏢 <b>Шаг 5 из 5.</b> Выберите филиал:", await branchKeyboard(env, "addbranch"));
     return true;
   }
   if (state.state === "branch_name") {
@@ -494,15 +505,18 @@ async function handleStateMessage(env: Env, message: TgMessage, state: { state: 
     return true;
   }
   if (state.state === "settings_caption") {
-    if (!text || text.length > 900 || /\{(?!name\}|position\}|branch\}|date\})/.test(text)) { await sendMessage(env, chatId, "Текст некорректен или содержит неизвестные переменные."); return true; }
+    if (!text || text.length > 900 || hasUnknownPlaceholders(text, new Set(["ФИО", "Должность", "Филиал", "Дата"]), new Set(["name", "position", "branch", "date"]))) {
+      await sendMessage(env, chatId, "Текст некорректен или содержит неизвестные поля."); return true;
+    }
     await setSetting(env, "caption_template", text);
     await clearSession(env, adminId);
     await sendMessage(env, chatId, "✅ Текст поздравления сохранён.", panelKeyboard(isOwner(env, adminId)));
     return true;
   }
   if (state.state === "settings_group_caption") {
-    if (!text || text.length > 900 || /\{(?!people\}|count\})/.test(text) || !text.includes("{people}")) {
-      await sendMessage(env, chatId, "Общий текст должен содержать {people}; доступна также переменная {count}.");
+    const hasPeople = Boolean(text?.includes("[Список]") || text?.includes("{people}"));
+    if (!text || text.length > 900 || hasUnknownPlaceholders(text, new Set(["Список", "Количество"]), new Set(["people", "count"])) || !hasPeople) {
+      await sendMessage(env, chatId, "Общий текст должен содержать [Список]; также доступно поле [Количество].");
       return true;
     }
     await setSetting(env, "group_caption_template", text);
@@ -558,7 +572,7 @@ async function handleMessage(env: Env, message: TgMessage): Promise<void> {
   if (action === "🎂 Новый именинник") {
     await clearSession(env, message.from.id);
     await setSession(env, message.from.id, "add_photo");
-    await sendMessage(env, message.chat.id, "Шаг 1 из 5. Пришлите фотографию именинника.", cancelKeyboard);
+    await sendMessage(env, message.chat.id, "📷 <b>Шаг 1 из 5.</b> Пришлите фотографию именинника.", cancelKeyboard);
     return;
   }
   if (action === "📅 Именинники") {
@@ -647,7 +661,7 @@ async function handleCallback(env: Env, callback: TgCallback): Promise<void> {
     await showModerators(env, chatId);
     return;
   }
-  if (data === "menu:add") { await setSession(env, callback.from.id, "add_photo"); await sendMessage(env, chatId, "Шаг 1 из 5. Пришлите фотографию именинника.", cancelKeyboard); return; }
+  if (data === "menu:add") { await setSession(env, callback.from.id, "add_photo"); await sendMessage(env, chatId, "📷 <b>Шаг 1 из 5.</b> Пришлите фотографию именинника.", cancelKeyboard); return; }
   if (data === "menu:birthdays") { await clearSession(env, callback.from.id); await showBirthdaysMenu(env, chatId); return; }
   if (data.startsWith("month:")) { await showMonth(env, chatId, Number(data.split(":")[1])); return; }
   if (data === "birthdays:all") { await showAll(env, chatId); return; }
@@ -665,7 +679,7 @@ async function handleCallback(env: Env, callback: TgCallback): Promise<void> {
     const [, , idText, field] = data.split(":");
     if (field === "branch") { await sendMessage(env, chatId, "Выберите новый филиал:", await branchKeyboard(env, `editbranch:${idText}`)); return; }
     await setSession(env, callback.from.id, `edit_${field}`, { birthday_id: Number(idText) });
-    const prompts: Record<string, string> = { photo: "Пришлите новое фото.", name: "Введите новое имя.", birth_date: "Введите новую дату.", position: "Введите новую должность." };
+    const prompts: Record<string, string> = { photo: "📷 Пришлите новое фото.", name: "👤 Введите новое имя.", birth_date: "📅 Введите новую дату, например <b>15.10</b> или <b>15-10</b>.", position: "💼 Введите новую должность." };
     await sendMessage(env, chatId, prompts[field] ?? "Введите новое значение.", cancelKeyboard); return;
   }
   if (data.startsWith("editbranch:")) {
@@ -715,8 +729,8 @@ async function handleCallback(env: Env, callback: TgCallback): Promise<void> {
     const prompts: Record<string, string> = {
       channel: "Перешлите пост из канала или отправьте @username / -100… Бот должен быть администратором.",
       template: "Пришлите прозрачный PNG <b>как документ</b>. Рекомендуемый размер 1080×1080.",
-      caption: "Отправьте текст. Переменные: <code>{name}</code>, <code>{position}</code>, <code>{branch}</code>, <code>{date}</code>.",
-      group_caption: "Отправьте общий текст для 2–9 именинников. Обязательная переменная: <code>{people}</code>; также доступна <code>{count}</code>.",
+      caption: "Отправьте текст поздравления. Доступные поля: <code>[ФИО]</code>, <code>[Должность]</code>, <code>[Филиал]</code>, <code>[Дата]</code>.",
+      group_caption: "Отправьте общий текст для 2–9 именинников. Обязательное поле: <code>[Список]</code>; также доступно <code>[Количество]</code>.",
       time: "Введите время публикации в формате ЧЧ:ММ.",
     };
     await sendMessage(env, chatId, prompts[kind], cancelKeyboard);

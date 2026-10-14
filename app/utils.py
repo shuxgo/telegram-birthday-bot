@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import html
 import re
-import string
 from datetime import date, datetime
 
 
@@ -12,32 +11,37 @@ MONTHS_RU = (
 )
 
 DEFAULT_CAPTION = (
-    "🎉 <b>Поздравляем с днём рождения!</b>\n\n"
-    "Сегодня свой день рождения отмечает:\n\n"
-    "<b>{name}</b>\n"
-    "💼 {position}\n"
-    "🏢 Филиал «{branch}»\n\n"
-    "Желаем крепкого здоровья, счастья, вдохновения и ярких профессиональных побед! 🎂"
+    "🎉 Поздравляем <b>[ФИО]</b>, [Должность] филиала «[Филиал]», с днём рождения!\n\n"
+    "Желаем крепкого здоровья, благополучия, вдохновения и новых успехов! 💙"
 )
 
 DEFAULT_GROUP_CAPTION = (
-    "🎉 <b>Поздравляем наших именинников!</b>\n\n"
-    "Сегодня день рождения отмечают:\n\n"
-    "{people}\n\n"
-    "Желаем крепкого здоровья, счастья, вдохновения и ярких профессиональных побед! 🎂"
+    "🎉 Поздравляем с днём рождения [Список]!\n\n"
+    "Желаем крепкого здоровья, благополучия, вдохновения и новых успехов! 💙"
 )
 
 ALLOWED_PLACEHOLDERS = {"name", "position", "branch", "date"}
 ALLOWED_GROUP_PLACEHOLDERS = {"people", "count"}
+RUSSIAN_PLACEHOLDERS = {"ФИО", "Должность", "Филиал", "Дата"}
+RUSSIAN_GROUP_PLACEHOLDERS = {"Список", "Количество"}
 
 
 def parse_birth_date(value: str) -> date:
-    cleaned = value.strip().replace("/", ".").replace("-", ".")
-    if not re.fullmatch(r"\d{1,2}\.\d{1,2}(?:\.\d{4})?", cleaned):
-        raise ValueError("Введите дату в формате ДД.ММ или ДД.ММ.ГГГГ")
-    parts = [int(item) for item in cleaned.split(".")]
-    day, month = parts[0], parts[1]
-    year = parts[2] if len(parts) == 3 else 2000
+    cleaned = value.strip()
+    separator = r"[\s./\\_-]+"
+    iso_match = re.fullmatch(rf"(\d{{4}}){separator}(\d{{1,2}}){separator}(\d{{1,2}})", cleaned)
+    usual_match = re.fullmatch(rf"(\d{{1,2}}){separator}(\d{{1,2}})(?:{separator}(\d{{2}}|\d{{4}}))?", cleaned)
+    if iso_match:
+        year, month, day = map(int, iso_match.groups())
+    elif usual_match:
+        day = int(usual_match.group(1))
+        month = int(usual_match.group(2))
+        year_text = usual_match.group(3)
+        year = 2000 if year_text is None else int(year_text)
+        if year_text is not None and len(year_text) == 2:
+            year += 2000 if year < 50 else 1900
+    else:
+        raise ValueError("Введите дату, например 15.10 или 15-10")
     try:
         return date(year, month, day)
     except ValueError as exc:
@@ -52,31 +56,23 @@ def display_birth_date(value: str) -> str:
 def validate_caption_template(template: str) -> None:
     if len(template) > 900:
         raise ValueError("Шаблон слишком длинный — максимум 900 символов")
-    try:
-        fields = {field for _, field, _, _ in string.Formatter().parse(template) if field}
-    except ValueError as exc:
-        raise ValueError("Проверьте парные фигурные скобки") from exc
-    unknown = fields - ALLOWED_PLACEHOLDERS
+    curly = set(re.findall(r"\{([^{}]+)\}", template))
+    square = set(re.findall(r"\[([^\[\]]+)\]", template))
+    unknown = (curly - ALLOWED_PLACEHOLDERS) | (square - RUSSIAN_PLACEHOLDERS)
     if unknown:
         raise ValueError(f"Неизвестные переменные: {', '.join(sorted(unknown))}")
-    try:
-        template.format(name="Имя", position="должность", branch="филиал", date="1 января")
-    except (KeyError, ValueError) as exc:
-        raise ValueError("Не удалось обработать шаблон") from exc
 
 
 def validate_group_caption_template(template: str) -> None:
     if len(template) > 900:
         raise ValueError("Шаблон слишком длинный — максимум 900 символов")
-    try:
-        fields = {field for _, field, _, _ in string.Formatter().parse(template) if field}
-    except ValueError as exc:
-        raise ValueError("Проверьте парные фигурные скобки") from exc
-    unknown = fields - ALLOWED_GROUP_PLACEHOLDERS
+    curly = set(re.findall(r"\{([^{}]+)\}", template))
+    square = set(re.findall(r"\[([^\[\]]+)\]", template))
+    unknown = (curly - ALLOWED_GROUP_PLACEHOLDERS) | (square - RUSSIAN_GROUP_PLACEHOLDERS)
     if unknown:
         raise ValueError(f"Неизвестные переменные: {', '.join(sorted(unknown))}")
-    if "people" not in fields:
-        raise ValueError("Добавьте обязательную переменную {people}")
+    if "people" not in curly and "Список" not in square:
+        raise ValueError("Добавьте обязательную переменную [Список]")
 
 
 def render_caption(template: str, birthday: dict) -> str:
@@ -86,7 +82,16 @@ def render_caption(template: str, birthday: dict) -> str:
         "branch": html.escape(str(birthday["branch_name"])),
         "date": display_birth_date(str(birthday["birth_date"])),
     }
-    return template.replace("\\n", "\n").format_map(values)
+    result = template.replace("\\n", "\n")
+    replacements = {
+        "[ФИО]": values["name"], "[Должность]": values["position"],
+        "[Филиал]": values["branch"], "[Дата]": values["date"],
+        "{name}": values["name"], "{position}": values["position"],
+        "{branch}": values["branch"], "{date}": values["date"],
+    }
+    for placeholder, replacement in replacements.items():
+        result = result.replace(placeholder, replacement)
+    return result
 
 
 def _compact(value: object, limit: int) -> str:
@@ -95,24 +100,28 @@ def _compact(value: object, limit: int) -> str:
 
 
 def render_group_caption(template: str, birthdays: list[dict]) -> str:
-    people = "\n".join(
-        f"{index}. <b>{html.escape(_compact(row['name'], 36))}</b> — "
-        f"{html.escape(_compact(row['position'], 28))} · "
-        f"{html.escape(_compact(row['branch_name'], 22))}"
-        for index, row in enumerate(birthdays, start=1)
+    entries = [
+        f"<b>{html.escape(_compact(row['name'], 36))}</b> "
+        f"({html.escape(_compact(row['position'], 28))}, филиал "
+        f"«{html.escape(_compact(row['branch_name'], 22))}»)"
+        for row in birthdays
+    ]
+    people = entries[0] if len(entries) == 1 else (
+        " и ".join(entries) if len(entries) == 2 else ", ".join(entries[:-1]) + " и " + entries[-1]
     )
-    caption = template.replace("\\n", "\n").format_map(
-        {"people": people, "count": len(birthdays)}
-    )
+    caption = template.replace("\\n", "\n")
+    for placeholder, replacement in {
+        "[Список]": people, "[Количество]": str(len(birthdays)),
+        "{people}": people, "{count}": str(len(birthdays)),
+    }.items():
+        caption = caption.replace(placeholder, replacement)
     if len(caption) <= 1000:
         return caption
-    names = "\n".join(
-        f"{index}. <b>{html.escape(_compact(row['name'], 55))}</b>"
-        for index, row in enumerate(birthdays, start=1)
-    )
+    names_list = [f"<b>{html.escape(_compact(row['name'], 55))}</b>" for row in birthdays]
+    names = " и ".join(names_list) if len(names_list) == 2 else ", ".join(names_list[:-1]) + " и " + names_list[-1]
     return (
-        f"🎉 <b>Поздравляем наших именинников!</b>\n\n{names}\n\n"
-        "Желаем здоровья, счастья, вдохновения и ярких профессиональных побед! 🎂"
+        f"🎉 Поздравляем с днём рождения {names}!\n\n"
+        "Желаем здоровья, благополучия, вдохновения и новых успехов! 💙"
     )
 
 
