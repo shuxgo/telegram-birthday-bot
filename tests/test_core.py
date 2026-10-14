@@ -9,7 +9,7 @@ from PIL import Image
 
 from app.database import Database
 from app.image_service import ensure_default_template, render_card, validate_overlay
-from app.keyboards import main_menu, settings_menu
+from app.keyboards import birthday_days, main_menu, settings_menu
 from app.utils import (
     DEFAULT_GROUP_CAPTION,
     month_bounds,
@@ -120,6 +120,21 @@ class KeyboardTests(unittest.TestCase):
             for button in row
         ]
         self.assertIn("menu:branches", callbacks)
+
+    def test_month_view_groups_birthdays_by_day(self) -> None:
+        keyboard = birthday_days(
+            [
+                {"id": 1, "name": "Анна", "birth_date": "2000-10-15"},
+                {"id": 2, "name": "Иван", "birth_date": "1990-10-15"},
+                {"id": 3, "name": "Ольга", "birth_date": "1985-10-20"},
+            ],
+            offset=0,
+            month=10,
+        )
+        buttons = [button for row in keyboard.inline_keyboard for button in row]
+        self.assertEqual(buttons[0].callback_data, "day:0:10:15")
+        self.assertIn("2 чел.", buttons[0].text)
+        self.assertEqual(buttons[1].callback_data, "day:0:10:20")
 
 
 class DatabaseTests(unittest.IsolatedAsyncioTestCase):

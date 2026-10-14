@@ -13,7 +13,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.enums import ChatMemberStatus, ChatType
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, FSInputFile, Message, MessageOriginChannel, MessageOriginUser
+from aiogram.types import CallbackQuery, FSInputFile, InputMediaPhoto, Message, MessageOriginChannel, MessageOriginUser
 
 from .config import Config
 from .database import Database
@@ -21,6 +21,8 @@ from .image_service import render_card, validate_overlay
 from .keyboards import (
     back_to_menu,
     birthday_card,
+    birthday_day_actions,
+    birthday_days,
     birthdays_list,
     birthdays_menu,
     branch_picker,
@@ -34,12 +36,14 @@ from .keyboards import (
 )
 from .states import AddBirthday, AddBranch, AddModerator, EditBirthday, SettingValue
 from .utils import (
+    DEFAULT_GROUP_CAPTION,
     MONTHS_RU,
     display_birth_date,
     month_bounds,
     parse_birth_date,
     parse_publish_time,
     render_caption,
+    render_group_caption,
     validate_caption_template,
     validate_group_caption_template,
 )
@@ -275,8 +279,60 @@ async def list_month(callback: CallbackQuery, db: Database, config: Config) -> N
     if current:
         chunks.append(current)
     for index, chunk in enumerate(chunks):
-        markup = birthdays_list(rows, offset) if index == len(chunks) - 1 else None
+        markup = birthday_days(rows, offset, month) if index == len(chunks) - 1 else None
         await callback.message.answer(chunk, reply_markup=markup)
+
+
+@router.callback_query(F.data.startswith("day:"))
+async def preview_day(callback: CallbackQuery, db: Database, config: Config) -> None:
+    _, offset_text, month_text, day_text = callback.data.split(":")
+    offset, month, day = int(offset_text), int(month_text), int(day_text)
+    rows = [
+        row for row in await db.list_birthdays_for_month(datetime.now(config.timezone).year, month)
+        if int(str(row["birth_date"])[8:10]) == day
+    ]
+    await callback.answer()
+    if not rows:
+        await callback.message.answer("На эту дату именинников нет.", reply_markup=birthdays_menu())
+        return
+    settings = await db.get_settings()
+    await callback.message.answer(
+        f"🎞 <b>Предпросмотр публикации за {day} {MONTHS_RU[month - 1]}</b>\n\n"
+        "Ниже пост выглядит так же, как будет опубликован в канале."
+    )
+    for start in range(0, len(rows), 9):
+        batch = rows[start:start + 9]
+        outputs: list[Path] = []
+        try:
+            for row in batch:
+                output = config.data_dir / "cards" / f"preview-day-{month}-{day}-{row['id']}.jpg"
+                render_card(Path(row["photo_path"]), Path(settings["template_path"]), output)
+                outputs.append(output)
+            caption = (
+                render_caption(settings["caption_template"], batch[0])
+                if len(batch) == 1
+                else render_group_caption(
+                    settings.get("group_caption_template", DEFAULT_GROUP_CAPTION), batch
+                )
+            )
+            if len(batch) == 1:
+                await callback.message.answer_photo(FSInputFile(outputs[0]), caption=caption)
+            else:
+                media = [
+                    InputMediaPhoto(
+                        media=FSInputFile(output),
+                        caption=caption if index == 0 else None,
+                    )
+                    for index, output in enumerate(outputs)
+                ]
+                await callback.message.answer_media_group(media)
+        except Exception as exc:
+            logger.exception("Could not render day preview")
+            await callback.message.answer(f"⚠️ Не удалось собрать часть предпросмотра: {html.escape(str(exc))}")
+    await callback.message.answer(
+        "Чтобы изменить данные, выберите именинника:",
+        reply_markup=birthday_day_actions(rows, offset),
+    )
 
 
 @router.callback_query(F.data == "birthdays:all")

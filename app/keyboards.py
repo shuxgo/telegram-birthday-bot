@@ -68,6 +68,31 @@ def birthdays_list(rows: list[dict[str, Any]], offset: int) -> InlineKeyboardMar
     return builder.as_markup()
 
 
+def birthday_days(rows: list[dict[str, Any]], offset: int, month: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    counts: dict[int, int] = {}
+    for row in rows:
+        day = int(str(row["birth_date"])[8:10])
+        counts[day] = counts.get(day, 0) + 1
+    for day, count in sorted(counts.items()):
+        builder.button(
+            text=f"🎞 {day:02d} · {count} чел.",
+            callback_data=f"day:{offset}:{month}:{day}",
+        )
+    builder.button(text="⬅️ К разделу", callback_data="menu:birthdays")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def birthday_day_actions(rows: list[dict[str, Any]], offset: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for row in rows:
+        builder.button(text=f"✏️ {row['name']}", callback_data=f"birthday:view:{row['id']}")
+    builder.button(text="⬅️ К месяцу", callback_data=f"month:{offset}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def birthday_card(birthday_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="✏️ Редактировать", callback_data=f"birthday:edit:{birthday_id}")

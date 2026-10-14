@@ -623,11 +623,57 @@ async function showMonth(env: Env, chatId: number, offset: number): Promise<void
   const text = result.results.length
     ? [`📅 <b>Именинники — ${MONTHS[month - 1]} ${year}</b>`, ...result.results.map((r) => `${displayDate(String(r.birth_date))} — <b>${html(r.name)}</b>, ${html(r.position)}, ${html(r.branch_name)}`)].join("\n\n")
     : `📅 <b>Именинники — ${MONTHS[month - 1]} ${year}</b>\n\nЗаписей нет.`;
+  const days = new Map<number, Row[]>();
+  for (const row of result.results) {
+    const day = Number(String(row.birth_date).slice(8));
+    days.set(day, [...(days.get(day) ?? []), row]);
+  }
   const keyboard: InlineKeyboard = { inline_keyboard: [
-    ...result.results.slice(0, 90).map((r) => [{ text: `${String(r.birth_date).slice(8)} · ${r.name}`, callback_data: `birthday:view:${r.id}` }]),
+    ...[...days.entries()].map(([day, rows]) => [{
+      text: `🎞 ${day} ${MONTHS[month - 1]} · ${rows.length} чел.`,
+      callback_data: `day:${offset}:${month}:${day}`,
+    }]),
     [{ text: "⬅️ К разделу", callback_data: "menu:birthdays" }],
   ] };
   await sendMessage(env, chatId, text.slice(0, 4000), keyboard);
+}
+
+async function showDayPreview(env: Env, chatId: number, offset: number, month: number, day: number): Promise<void> {
+  const config = await settings(env);
+  const result = await env.DB.prepare(
+    "SELECT bd.*,b.name branch_name FROM birthdays bd JOIN branches b ON b.id=bd.branch_id " +
+    "WHERE CAST(substr(birth_date,6,2) AS INTEGER)=? AND CAST(substr(birth_date,9,2) AS INTEGER)=? ORDER BY bd.name",
+  ).bind(month, day).all<Row>();
+  if (!result.results.length) {
+    await sendMessage(env, chatId, "На эту дату именинников нет.", { inline_keyboard: [[
+      { text: "⬅️ К месяцу", callback_data: `month:${offset}` },
+    ]] });
+    return;
+  }
+
+  await sendMessage(env, chatId, `🎞 <b>Предпросмотр публикации за ${day} ${MONTHS[month - 1]}</b>\n\nНиже пост выглядит так же, как будет опубликован в канале.`);
+  for (let index = 0; index < result.results.length; index += 9) {
+    const batch = result.results.slice(index, index + 9);
+    try {
+      const cards = await Promise.all(batch.map((row) => composeCard(env, String(row.photo_key), config.template_key)));
+      const caption = batch.length === 1
+        ? renderCaption(config.caption_template, batch[0])
+        : renderGroupCaption(config.group_caption_template ?? DEFAULT_GROUP_CAPTION, batch);
+      if (batch.length === 1) await sendPhotoBytes(env, chatId, cards[0], caption);
+      else await sendMediaGroupBytes(env, chatId, cards, caption);
+    } catch (error) {
+      await sendMessage(env, chatId, `⚠️ Не удалось собрать часть предпросмотра: ${html(error)}`);
+    }
+  }
+
+  const keyboard: InlineKeyboard = { inline_keyboard: [
+    ...result.results.slice(0, 90).map((row) => [{
+      text: `✏️ ${compact(row.name, 48)}`,
+      callback_data: `birthday:view:${row.id}`,
+    }]),
+    [{ text: "⬅️ К месяцу", callback_data: `month:${offset}` }],
+  ] };
+  await sendMessage(env, chatId, "Чтобы изменить данные, выберите именинника:", keyboard);
 }
 
 async function showAll(env: Env, chatId: number): Promise<void> {
@@ -664,6 +710,10 @@ async function handleCallback(env: Env, callback: TgCallback): Promise<void> {
   if (data === "menu:add") { await setSession(env, callback.from.id, "add_photo"); await sendMessage(env, chatId, "📷 <b>Шаг 1 из 5.</b> Пришлите фотографию именинника.", cancelKeyboard); return; }
   if (data === "menu:birthdays") { await clearSession(env, callback.from.id); await showBirthdaysMenu(env, chatId); return; }
   if (data.startsWith("month:")) { await showMonth(env, chatId, Number(data.split(":")[1])); return; }
+  if (data.startsWith("day:")) {
+    const [, offset, month, day] = data.split(":").map(Number);
+    await showDayPreview(env, chatId, offset, month, day); return;
+  }
   if (data === "birthdays:all") { await showAll(env, chatId); return; }
   if (data.startsWith("birthday:view:")) { await showBirthday(env, chatId, Number(data.split(":")[2])); return; }
   if (data.startsWith("birthday:edit:")) {
