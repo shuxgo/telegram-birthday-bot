@@ -1,0 +1,2 @@
+"""Telegram birthday bot package."""
+

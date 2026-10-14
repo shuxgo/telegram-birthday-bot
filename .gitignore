@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+data/
+node_modules/
+.wrangler/
+.dev.vars
+cloudflare/.dev.vars
