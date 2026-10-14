@@ -9,6 +9,7 @@ from PIL import Image
 
 from app.database import Database
 from app.image_service import ensure_default_template, render_card, validate_overlay
+from app.keyboards import main_menu, settings_menu
 from app.utils import (
     DEFAULT_GROUP_CAPTION,
     month_bounds,
@@ -93,6 +94,25 @@ class ImageTests(unittest.TestCase):
             self.assertTrue(output.exists())
             with Image.open(output) as result:
                 self.assertEqual(result.size, (1080, 1080))
+
+
+class KeyboardTests(unittest.TestCase):
+    def test_persistent_panel_has_only_expected_buttons(self) -> None:
+        moderator_texts = [button.text for row in main_menu(False).keyboard for button in row]
+        owner_texts = [button.text for row in main_menu(True).keyboard for button in row]
+        self.assertEqual(
+            moderator_texts,
+            ["🎂 Новый именинник", "📅 Именинники", "⚙️ Настройки"],
+        )
+        self.assertEqual(owner_texts[-1], "👥 Модераторы")
+
+    def test_branches_are_inside_settings(self) -> None:
+        callbacks = [
+            button.callback_data
+            for row in settings_menu().inline_keyboard
+            for button in row
+        ]
+        self.assertIn("menu:branches", callbacks)
 
 
 class DatabaseTests(unittest.IsolatedAsyncioTestCase):

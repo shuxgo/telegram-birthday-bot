@@ -102,6 +102,47 @@ async def cancel_action(callback: CallbackQuery, state: FSMContext, is_owner: bo
     await _show_main(callback.message, is_owner)
 
 
+# ---- Persistent control panel -------------------------------------------
+
+
+@router.message(F.text == "🎂 Новый именинник")
+async def panel_add_birthday(message: Message, state: FSMContext, db: Database) -> None:
+    branches = await db.list_branches()
+    if not branches:
+        await message.answer("Сначала добавьте хотя бы один филиал.", reply_markup=settings_menu())
+        return
+    await state.clear()
+    await state.set_state(AddBirthday.photo)
+    await message.answer(
+        "Шаг 1 из 5. Пришлите фотографию именинника.", reply_markup=cancel_keyboard()
+    )
+
+
+@router.message(F.text == "📅 Именинники")
+async def panel_birthdays(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("🎂 <b>Именинники</b>", reply_markup=birthdays_menu())
+
+
+@router.message(F.text == "⚙️ Настройки")
+async def panel_settings(
+    message: Message, state: FSMContext, db: Database, config: Config
+) -> None:
+    await state.clear()
+    await message.answer(await _settings_status(db, config), reply_markup=settings_menu())
+
+
+@router.message(F.text == "👥 Модераторы")
+async def panel_moderators(
+    message: Message, state: FSMContext, db: Database, config: Config, is_owner: bool
+) -> None:
+    await state.clear()
+    if not is_owner:
+        await message.answer("Только главный администратор может управлять модераторами.")
+        return
+    await _show_moderators(message, db, config)
+
+
 # ---- Add birthday wizard -------------------------------------------------
 
 

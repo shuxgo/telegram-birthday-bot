@@ -18,6 +18,12 @@ interface Env {
 type Row = Record<string, string | number | null>;
 type InlineButton = { text: string; callback_data: string };
 type InlineKeyboard = { inline_keyboard: InlineButton[][] };
+type ReplyKeyboard = {
+  keyboard: { text: string }[][];
+  resize_keyboard: true;
+  is_persistent: true;
+};
+type KeyboardMarkup = InlineKeyboard | ReplyKeyboard;
 
 interface TgUser { id: number; username?: string; first_name?: string; last_name?: string }
 interface TgPhoto { file_id: string; width: number; height: number }
@@ -50,16 +56,16 @@ const DEFAULT_GROUP_CAPTION =
   "Сегодня день рождения отмечают:\n\n{people}\n\n" +
   "Желаем крепкого здоровья, счастья, вдохновения и ярких профессиональных побед! 🎂";
 
-function mainMenu(owner = false): InlineKeyboard {
-  return { inline_keyboard: [
-    [{ text: "➕ Добавить именинника", callback_data: "menu:add" }],
-    [{ text: "🎂 Именинники", callback_data: "menu:birthdays" }],
-    [
-      { text: "🏢 Филиалы", callback_data: "menu:branches" },
-      { text: "⚙️ Настройки", callback_data: "menu:settings" },
+function panelKeyboard(owner = false): ReplyKeyboard {
+  return {
+    keyboard: [
+      [{ text: "🎂 Новый именинник" }, { text: "📅 Именинники" }],
+      [{ text: "⚙️ Настройки" }],
+      ...(owner ? [[{ text: "👥 Модераторы" }]] : []),
     ],
-    ...(owner ? [[{ text: "👥 Модераторы", callback_data: "menu:moderators" }]] : []),
-  ] };
+    resize_keyboard: true,
+    is_persistent: true,
+  };
 }
 const cancelKeyboard: InlineKeyboard = {
   inline_keyboard: [[{ text: "✖️ Отмена", callback_data: "cancel" }]],
@@ -107,7 +113,7 @@ async function tg<T = unknown>(env: Env, method: string, payload: Record<string,
   return body.result;
 }
 
-async function sendMessage(env: Env, chatId: number | string, text: string, keyboard?: InlineKeyboard): Promise<void> {
+async function sendMessage(env: Env, chatId: number | string, text: string, keyboard?: KeyboardMarkup): Promise<void> {
   await tg(env, "sendMessage", {
     chat_id: chatId,
     text,
@@ -295,7 +301,7 @@ async function showMain(env: Env, chatId: number, userId: number): Promise<void>
     env,
     chatId,
     `🎉 <b>Бот поздравлений</b>\n\nРоль: <b>${role}</b>. Добавляйте именинников, управляйте филиалами и публикациями.`,
-    mainMenu(isOwner(env, userId)),
+    panelKeyboard(isOwner(env, userId)),
   );
 }
 
@@ -394,7 +400,7 @@ async function handleStateMessage(env: Env, message: TgMessage, state: { state: 
     try {
       await env.DB.prepare("INSERT INTO branches(name) VALUES(?)").bind(text).run();
       await clearSession(env, adminId);
-      await sendMessage(env, chatId, "✅ Филиал добавлен.", mainMenu(isOwner(env, adminId)));
+      await sendMessage(env, chatId, "✅ Филиал добавлен.", panelKeyboard(isOwner(env, adminId)));
     } catch { await sendMessage(env, chatId, "Такой филиал уже существует."); }
     return true;
   }
@@ -466,7 +472,7 @@ async function handleStateMessage(env: Env, message: TgMessage, state: { state: 
       await setSetting(env, "channel_id", String(target.id));
       await setSetting(env, "channel_title", target.title ?? target.username ?? String(target.id));
       await clearSession(env, adminId);
-      await sendMessage(env, chatId, `✅ Канал «<b>${html(target.title ?? target.username ?? target.id)}</b>» сохранён.`, mainMenu(isOwner(env, adminId)));
+      await sendMessage(env, chatId, `✅ Канал «<b>${html(target.title ?? target.username ?? target.id)}</b>» сохранён.`, panelKeyboard(isOwner(env, adminId)));
     } catch (error) { await sendMessage(env, chatId, `Не удалось проверить канал: ${html(error)}`); }
     return true;
   }
@@ -483,7 +489,7 @@ async function handleStateMessage(env: Env, message: TgMessage, state: { state: 
       await env.MEDIA.put(key, bytes);
       await setSetting(env, "template_key", key);
       await clearSession(env, adminId);
-      await sendMessage(env, chatId, "✅ PNG-шаблон сохранён и будет применён к будущим публикациям.", mainMenu(isOwner(env, adminId)));
+      await sendMessage(env, chatId, "✅ PNG-шаблон сохранён и будет применён к будущим публикациям.", panelKeyboard(isOwner(env, adminId)));
     } catch (error) { await sendMessage(env, chatId, `Шаблон не принят: ${html(error)}`); }
     return true;
   }
@@ -491,7 +497,7 @@ async function handleStateMessage(env: Env, message: TgMessage, state: { state: 
     if (!text || text.length > 900 || /\{(?!name\}|position\}|branch\}|date\})/.test(text)) { await sendMessage(env, chatId, "Текст некорректен или содержит неизвестные переменные."); return true; }
     await setSetting(env, "caption_template", text);
     await clearSession(env, adminId);
-    await sendMessage(env, chatId, "✅ Текст поздравления сохранён.", mainMenu(isOwner(env, adminId)));
+    await sendMessage(env, chatId, "✅ Текст поздравления сохранён.", panelKeyboard(isOwner(env, adminId)));
     return true;
   }
   if (state.state === "settings_group_caption") {
@@ -501,7 +507,7 @@ async function handleStateMessage(env: Env, message: TgMessage, state: { state: 
     }
     await setSetting(env, "group_caption_template", text);
     await clearSession(env, adminId);
-    await sendMessage(env, chatId, "✅ Общий текст для нескольких именинников сохранён.", mainMenu(isOwner(env, adminId)));
+    await sendMessage(env, chatId, "✅ Общий текст для нескольких именинников сохранён.", panelKeyboard(isOwner(env, adminId)));
     return true;
   }
   if (state.state === "settings_time") {
@@ -510,10 +516,32 @@ async function handleStateMessage(env: Env, message: TgMessage, state: { state: 
     const value = `${match[1].padStart(2, "0")}:${match[2]}`;
     await setSetting(env, "publish_time", value);
     await clearSession(env, adminId);
-    await sendMessage(env, chatId, `✅ Время публикации изменено на ${value}.`, mainMenu(isOwner(env, adminId)));
+    await sendMessage(env, chatId, `✅ Время публикации изменено на ${value}.`, panelKeyboard(isOwner(env, adminId)));
     return true;
   }
   return false;
+}
+
+async function showBirthdaysMenu(env: Env, chatId: number): Promise<void> {
+  await sendMessage(env, chatId, "🎂 <b>Именинники</b>", { inline_keyboard: [
+    [{ text: "📅 Текущий месяц", callback_data: "month:0" }],
+    [{ text: "🗓 Следующий месяц", callback_data: "month:1" }],
+    [{ text: "🔎 Все / редактировать", callback_data: "birthdays:all" }],
+    [{ text: "⬅️ Назад", callback_data: "menu:main" }],
+  ] });
+}
+
+async function showSettings(env: Env, chatId: number): Promise<void> {
+  const config = await settings(env);
+  await sendMessage(env, chatId, `⚙️ <b>Настройки</b>\n\n📣 Канал: <b>${html(config.channel_title ?? "не настроен")}</b>\n⏰ Время: <b>${config.publish_time}</b> (${html(config.timezone)})`, { inline_keyboard: [
+    [{ text: "🏢 Филиалы", callback_data: "menu:branches" }],
+    [{ text: "📣 Канал публикации", callback_data: "settings:channel" }],
+    [{ text: "🖼 PNG-шаблон", callback_data: "settings:template" }],
+    [{ text: "📝 Текст поздравления", callback_data: "settings:caption" }],
+    [{ text: "👥 Общий текст для группы", callback_data: "settings:group_caption" }],
+    [{ text: "⏰ Время публикации", callback_data: "settings:time" }],
+    [{ text: "⬅️ Назад", callback_data: "menu:main" }],
+  ] });
 }
 
 async function handleMessage(env: Env, message: TgMessage): Promise<void> {
@@ -521,14 +549,40 @@ async function handleMessage(env: Env, message: TgMessage): Promise<void> {
     await sendMessage(env, message.chat.id, "⛔️ У вас нет доступа к этому боту.");
     return;
   }
-  if (message.text === "/start" || message.text === "/menu") {
+  const action = message.text?.trim();
+  if (action === "/start" || action === "/menu") {
     await clearSession(env, message.from.id);
     await showMain(env, message.chat.id, message.from.id);
     return;
   }
+  if (action === "🎂 Новый именинник") {
+    await clearSession(env, message.from.id);
+    await setSession(env, message.from.id, "add_photo");
+    await sendMessage(env, message.chat.id, "Шаг 1 из 5. Пришлите фотографию именинника.", cancelKeyboard);
+    return;
+  }
+  if (action === "📅 Именинники") {
+    await clearSession(env, message.from.id);
+    await showBirthdaysMenu(env, message.chat.id);
+    return;
+  }
+  if (action === "⚙️ Настройки") {
+    await clearSession(env, message.from.id);
+    await showSettings(env, message.chat.id);
+    return;
+  }
+  if (action === "👥 Модераторы") {
+    await clearSession(env, message.from.id);
+    if (!isOwner(env, message.from.id)) {
+      await sendMessage(env, message.chat.id, "Только главный администратор может управлять модераторами.", panelKeyboard(false));
+      return;
+    }
+    await showModerators(env, message.chat.id);
+    return;
+  }
   const session = await getSession(env, message.from.id);
   if (session && await handleStateMessage(env, message, session)) return;
-  await sendMessage(env, message.chat.id, "Используйте меню управления:", mainMenu(isOwner(env, message.from.id)));
+  await sendMessage(env, message.chat.id, "Панель управления обновлена.", panelKeyboard(isOwner(env, message.from.id)));
 }
 
 async function showBranches(env: Env, chatId: number): Promise<void> {
@@ -538,7 +592,7 @@ async function showBranches(env: Env, chatId: number): Promise<void> {
   const keyboard: InlineKeyboard = { inline_keyboard: [
     [{ text: "➕ Добавить филиал", callback_data: "branch:add" }],
     ...result.results.map((r) => [{ text: `🗑 ${r.name} (${r.count})`, callback_data: `branch:delete:${r.id}` }]),
-    [{ text: "⬅️ Назад", callback_data: "menu:main" }],
+    [{ text: "⬅️ В настройки", callback_data: "menu:settings" }],
   ] };
   await sendMessage(env, chatId, "🏢 <b>Филиалы</b>\n\nФилиал с именинниками удалить нельзя.", keyboard);
 }
@@ -594,12 +648,7 @@ async function handleCallback(env: Env, callback: TgCallback): Promise<void> {
     return;
   }
   if (data === "menu:add") { await setSession(env, callback.from.id, "add_photo"); await sendMessage(env, chatId, "Шаг 1 из 5. Пришлите фотографию именинника.", cancelKeyboard); return; }
-  if (data === "menu:birthdays") { await clearSession(env, callback.from.id); await sendMessage(env, chatId, "🎂 <b>Именинники</b>", { inline_keyboard: [
-    [{ text: "📅 Текущий месяц", callback_data: "month:0" }],
-    [{ text: "🗓 Следующий месяц", callback_data: "month:1" }],
-    [{ text: "🔎 Все / редактировать", callback_data: "birthdays:all" }],
-    [{ text: "⬅️ Назад", callback_data: "menu:main" }],
-  ] }); return; }
+  if (data === "menu:birthdays") { await clearSession(env, callback.from.id); await showBirthdaysMenu(env, chatId); return; }
   if (data.startsWith("month:")) { await showMonth(env, chatId, Number(data.split(":")[1])); return; }
   if (data === "birthdays:all") { await showAll(env, chatId); return; }
   if (data.startsWith("birthday:view:")) { await showBirthday(env, chatId, Number(data.split(":")[2])); return; }
@@ -634,7 +683,7 @@ async function handleCallback(env: Env, callback: TgCallback): Promise<void> {
   if (data.startsWith("birthday:confirm_delete:")) {
     const id = Number(data.split(":")[2]);
     await env.DB.prepare("DELETE FROM birthdays WHERE id=?").bind(id).run();
-    await sendMessage(env, chatId, "🗑 Запись удалена.", mainMenu(isOwner(env, callback.from.id))); return;
+    await sendMessage(env, chatId, "🗑 Запись удалена.", panelKeyboard(isOwner(env, callback.from.id))); return;
   }
   if (data.startsWith("addbranch:")) {
     const session = await getSession(env, callback.from.id);
@@ -658,15 +707,7 @@ async function handleCallback(env: Env, callback: TgCallback): Promise<void> {
   }
   if (data === "menu:settings") {
     await clearSession(env, callback.from.id);
-    const config = await settings(env);
-    await sendMessage(env, chatId, `⚙️ <b>Настройки</b>\n\n📣 Канал: <b>${html(config.channel_title ?? "не настроен")}</b>\n⏰ Время: <b>${config.publish_time}</b> (${html(config.timezone)})`, { inline_keyboard: [
-      [{ text: "📣 Канал публикации", callback_data: "settings:channel" }],
-      [{ text: "🖼 PNG-шаблон", callback_data: "settings:template" }],
-      [{ text: "📝 Текст поздравления", callback_data: "settings:caption" }],
-      [{ text: "👥 Общий текст для группы", callback_data: "settings:group_caption" }],
-      [{ text: "⏰ Время публикации", callback_data: "settings:time" }],
-      [{ text: "⬅️ Назад", callback_data: "menu:main" }],
-    ] }); return;
+    await showSettings(env, chatId); return;
   }
   if (data.startsWith("settings:")) {
     const kind = data.split(":")[1];
