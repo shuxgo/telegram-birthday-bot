@@ -251,12 +251,12 @@ function hasUnknownPlaceholders(text: string, allowedSquare: Set<string>, allowe
 
 function renderGroupCaption(template: string, rows: Row[]): string {
   const entries = rows.map((row) => (
-    `<b>${html(compact(row.name, 36))}</b> ` +
-    `(${html(compact(row.position, 28))}, филиал «${html(compact(row.branch_name, 22))}»)`
+    `<b>${html(compact(row.name, 36))}</b> — ` +
+    `${html(compact(row.position, 28))} филиала «${html(compact(row.branch_name, 22))}»`
   ));
   const people = entries.length === 1 ? entries[0]
     : entries.length === 2 ? entries.join(" и ")
-      : `${entries.slice(0, -1).join(", ")} и ${entries.at(-1)}`;
+      : `${entries.slice(0, -1).join("; ")} и ${entries.at(-1)}`;
   let caption = template.replaceAll("\\n", "\n")
     .replaceAll("[Список]", people).replaceAll("{people}", people)
     .replaceAll("[Количество]", String(rows.length)).replaceAll("{count}", String(rows.length));
@@ -359,6 +359,7 @@ async function showBirthday(env: Env, chatId: number, id: number): Promise<void>
   if (!row) return sendMessage(env, chatId, "Запись не найдена.", menuBack);
   const keyboard: InlineKeyboard = { inline_keyboard: [
     [{ text: "✏️ Редактировать", callback_data: `birthday:edit:${id}` }, { text: "🗑 Удалить", callback_data: `birthday:delete:${id}` }],
+    [{ text: "🎂 Новый именинник", callback_data: "menu:add" }],
     [{ text: "⬅️ К спискам", callback_data: "menu:birthdays" }],
   ] };
   const config = await settings(env);

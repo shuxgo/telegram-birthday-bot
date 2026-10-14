@@ -97,8 +97,9 @@ def birthday_card(birthday_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="✏️ Редактировать", callback_data=f"birthday:edit:{birthday_id}")
     builder.button(text="🗑 Удалить", callback_data=f"birthday:delete:{birthday_id}")
+    builder.button(text="🎂 Новый именинник", callback_data="menu:add")
     builder.button(text="⬅️ К спискам", callback_data="menu:birthdays")
-    builder.adjust(2, 1)
+    builder.adjust(2, 1, 1)
     return builder.as_markup()
 
 

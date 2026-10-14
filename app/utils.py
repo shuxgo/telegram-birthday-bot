@@ -101,13 +101,13 @@ def _compact(value: object, limit: int) -> str:
 
 def render_group_caption(template: str, birthdays: list[dict]) -> str:
     entries = [
-        f"<b>{html.escape(_compact(row['name'], 36))}</b> "
-        f"({html.escape(_compact(row['position'], 28))}, филиал "
-        f"«{html.escape(_compact(row['branch_name'], 22))}»)"
+        f"<b>{html.escape(_compact(row['name'], 36))}</b> — "
+        f"{html.escape(_compact(row['position'], 28))} филиала "
+        f"«{html.escape(_compact(row['branch_name'], 22))}»"
         for row in birthdays
     ]
     people = entries[0] if len(entries) == 1 else (
-        " и ".join(entries) if len(entries) == 2 else ", ".join(entries[:-1]) + " и " + entries[-1]
+        " и ".join(entries) if len(entries) == 2 else "; ".join(entries[:-1]) + " и " + entries[-1]
     )
     caption = template.replace("\\n", "\n")
     for placeholder, replacement in {

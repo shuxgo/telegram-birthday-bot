@@ -9,7 +9,7 @@ from PIL import Image
 
 from app.database import Database
 from app.image_service import ensure_default_template, render_card, validate_overlay
-from app.keyboards import birthday_days, main_menu, settings_menu
+from app.keyboards import birthday_card, birthday_days, main_menu, settings_menu
 from app.utils import (
     DEFAULT_GROUP_CAPTION,
     month_bounds,
@@ -85,6 +85,8 @@ class CaptionTests(unittest.TestCase):
         caption = render_group_caption(DEFAULT_GROUP_CAPTION, rows)
         self.assertIn("<b>Сотрудник 9</b>", caption)
         self.assertNotIn("1. <b>", caption)
+        self.assertNotIn("(ведущий специалист", caption)
+        self.assertIn("— ведущий специалист филиала", caption)
         self.assertIn(" и <b>Сотрудник 9</b>", caption)
         self.assertLessEqual(len(caption), 1000)
 
@@ -135,6 +137,14 @@ class KeyboardTests(unittest.TestCase):
         self.assertEqual(buttons[0].callback_data, "day:0:10:15")
         self.assertIn("2 чел.", buttons[0].text)
         self.assertEqual(buttons[1].callback_data, "day:0:10:20")
+
+    def test_birthday_card_can_start_another_birthday(self) -> None:
+        callbacks = [
+            button.callback_data
+            for row in birthday_card(42).inline_keyboard
+            for button in row
+        ]
+        self.assertIn("menu:add", callbacks)
 
 
 class DatabaseTests(unittest.IsolatedAsyncioTestCase):
