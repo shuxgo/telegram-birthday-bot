@@ -8,13 +8,19 @@
 - Cron Trigger запускает проверку публикаций каждую минуту;
 - WebAssembly собирает фотографию и прозрачный PNG в итоговую открытку.
 
-## Секреты
+## Администратор и секреты
 
-После деплоя добавьте три секрета в **Workers & Pages → telegram-birthday-bot → Settings → Variables and Secrets**:
+Главный администратор уже указан в `wrangler.jsonc`:
 
-- `BOT_TOKEN` — токен из BotFather;
-- `ADMIN_IDS` — Telegram ID админов через запятую;
-- `WEBHOOK_SECRET` — длинная случайная строка.
+- `OWNER_ID=426250217`;
+- `ADMIN_IDS=426250217` — оставлен для обратной совместимости.
+
+Главный администратор может назначать и снимать модераторов через кнопку **Модераторы**. Модераторы имеют тот же доступ к именинникам, филиалам и настройкам публикации, но не могут управлять другими модераторами.
+
+В **Workers & Pages → telegram-birthday-bot → Settings → Variables and Secrets** используются:
+
+- `BOT_TOKEN` — редактируемый секрет; замените заглушку токеном из BotFather;
+- `WEBHOOK_SECRET` — сгенерированный случайный секрет для проверки запросов Telegram.
 
 Затем зарегистрируйте webhook:
 
@@ -23,4 +29,4 @@ curl -X POST https://telegram-birthday-bot.<your-subdomain>.workers.dev/setup-we
   -H "Authorization: Bearer <WEBHOOK_SECRET>"
 ```
 
-Пока секреты не добавлены, `/health` отвечает успешно, но Telegram-функции отключены.
+Пока настоящий токен не добавлен, `/health` отвечает успешно с `configured: false`, а Telegram-функции отключены.

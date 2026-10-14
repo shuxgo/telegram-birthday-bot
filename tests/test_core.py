@@ -63,6 +63,19 @@ class ImageTests(unittest.TestCase):
 
 
 class DatabaseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_moderator_access_can_be_added_and_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            overlay = ensure_default_template(root / "overlay.png")
+            db = Database(root / "test.sqlite3")
+            await db.initialize(overlay)
+            self.assertFalse(await db.is_moderator(555))
+            await db.add_moderator(555, 426250217, username="moderator")
+            self.assertTrue(await db.is_moderator(555))
+            self.assertEqual((await db.list_moderators())[0]["user_id"], 555)
+            self.assertTrue(await db.remove_moderator(555))
+            self.assertFalse(await db.is_moderator(555))
+
     async def test_annual_publication_is_sent_only_once_per_year(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

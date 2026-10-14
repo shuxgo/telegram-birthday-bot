@@ -17,9 +17,12 @@ class AddBranch(StatesGroup):
     name = State()
 
 
+class AddModerator(StatesGroup):
+    user_id = State()
+
+
 class SettingValue(StatesGroup):
     channel = State()
     template = State()
     caption = State()
     publish_time = State()
-

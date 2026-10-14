@@ -5,6 +5,10 @@
   "compatibility_date": "2026-10-14",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+  "vars": {
+    "OWNER_ID": "426250217",
+    "ADMIN_IDS": "426250217"
+  },
   "triggers": { "crons": ["* * * * *"] },
   "d1_databases": [
     {

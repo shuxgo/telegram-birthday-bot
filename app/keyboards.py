@@ -6,13 +6,28 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
-def main_menu() -> InlineKeyboardMarkup:
+def main_menu(is_owner: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="➕ Добавить именинника", callback_data="menu:add")
     builder.button(text="🎂 Именинники", callback_data="menu:birthdays")
     builder.button(text="🏢 Филиалы", callback_data="menu:branches")
     builder.button(text="⚙️ Настройки", callback_data="menu:settings")
-    builder.adjust(1, 1, 2)
+    if is_owner:
+        builder.button(text="👥 Модераторы", callback_data="menu:moderators")
+        builder.adjust(1, 1, 2, 1)
+    else:
+        builder.adjust(1, 1, 2)
+    return builder.as_markup()
+
+
+def moderators_menu(rows: list[dict[str, Any]]) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Назначить модератора", callback_data="moderator:add")
+    for row in rows:
+        label = row.get("full_name") or row.get("username") or row["user_id"]
+        builder.button(text=f"🗑 Снять {label}", callback_data=f"moderator:remove:{row['user_id']}")
+    builder.button(text="⬅️ Назад", callback_data="menu:main")
+    builder.adjust(1)
     return builder.as_markup()
 
 

@@ -13,7 +13,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.enums import ChatMemberStatus, ChatType
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, FSInputFile, Message, MessageOriginChannel
+from aiogram.types import CallbackQuery, FSInputFile, Message, MessageOriginChannel, MessageOriginUser
 
 from .config import Config
 from .database import Database
@@ -29,9 +29,10 @@ from .keyboards import (
     delete_confirmation,
     edit_birthday_menu,
     main_menu,
+    moderators_menu,
     settings_menu,
 )
-from .states import AddBirthday, AddBranch, EditBirthday, SettingValue
+from .states import AddBirthday, AddBranch, AddModerator, EditBirthday, SettingValue
 from .utils import (
     MONTHS_RU,
     display_birth_date,
@@ -56,11 +57,12 @@ def _birthday_summary(row: dict[str, Any]) -> str:
     )
 
 
-async def _show_main(target: Message) -> None:
+async def _show_main(target: Message, is_owner: bool) -> None:
+    role = "главный администратор" if is_owner else "модератор"
     await target.answer(
         "🎉 <b>Бот поздравлений</b>\n\n"
-        "Добавляйте именинников, управляйте филиалами и настройками публикации.",
-        reply_markup=main_menu(),
+        f"Роль: <b>{role}</b>. Добавляйте именинников, управляйте филиалами и настройками публикации.",
+        reply_markup=main_menu(is_owner),
     )
 
 
@@ -91,23 +93,23 @@ async def _show_birthday(message: Message, birthday_id: int, db: Database, confi
 
 @router.message(CommandStart())
 @router.message(Command("menu"))
-async def command_start(message: Message, state: FSMContext) -> None:
+async def command_start(message: Message, state: FSMContext, is_owner: bool) -> None:
     await state.clear()
-    await _show_main(message)
+    await _show_main(message, is_owner)
 
 
 @router.callback_query(F.data == "menu:main")
-async def menu_main(callback: CallbackQuery, state: FSMContext) -> None:
+async def menu_main(callback: CallbackQuery, state: FSMContext, is_owner: bool) -> None:
     await state.clear()
     await callback.answer()
-    await _show_main(callback.message)
+    await _show_main(callback.message, is_owner)
 
 
 @router.callback_query(F.data == "cancel")
-async def cancel_action(callback: CallbackQuery, state: FSMContext) -> None:
+async def cancel_action(callback: CallbackQuery, state: FSMContext, is_owner: bool) -> None:
     await state.clear()
     await callback.answer("Действие отменено")
-    await _show_main(callback.message)
+    await _show_main(callback.message, is_owner)
 
 
 # ---- Add birthday wizard -------------------------------------------------
@@ -419,6 +421,89 @@ async def branch_delete(callback: CallbackQuery, db: Database) -> None:
     await callback.message.answer("🏢 Филиалы:", reply_markup=branches_menu(await db.list_branches()))
 
 
+# ---- Moderators ----------------------------------------------------------
+
+
+async def _show_moderators(message: Message, db: Database, config: Config) -> None:
+    rows = await db.list_moderators()
+    lines = []
+    for row in rows:
+        label = row.get("full_name") or (f"@{row['username']}" if row.get("username") else row["user_id"])
+        lines.append(f"• <b>{html.escape(str(label))}</b> — <code>{row['user_id']}</code>")
+    owner = next(iter(config.admin_ids))
+    await message.answer(
+        f"👥 <b>Модераторы</b>\n\nГлавный администратор: <code>{owner}</code>\n\n"
+        + ("\n".join(lines) if lines else "Модераторов пока нет."),
+        reply_markup=moderators_menu(rows),
+    )
+
+
+@router.callback_query(F.data == "menu:moderators")
+async def menu_moderators(
+    callback: CallbackQuery, state: FSMContext, db: Database, config: Config, is_owner: bool
+) -> None:
+    if not is_owner:
+        await callback.answer("Только для главного администратора", show_alert=True)
+        return
+    await state.clear()
+    await callback.answer()
+    await _show_moderators(callback.message, db, config)
+
+
+@router.callback_query(F.data == "moderator:add")
+async def moderator_add_start(callback: CallbackQuery, state: FSMContext, is_owner: bool) -> None:
+    if not is_owner:
+        await callback.answer("Только для главного администратора", show_alert=True)
+        return
+    await state.set_state(AddModerator.user_id)
+    await callback.answer()
+    await callback.message.answer(
+        "Перешлите сообщение будущего модератора или отправьте его числовой Telegram ID.",
+        reply_markup=cancel_keyboard(),
+    )
+
+
+@router.message(AddModerator.user_id)
+async def moderator_add_finish(
+    message: Message, state: FSMContext, db: Database, config: Config, is_owner: bool
+) -> None:
+    if not is_owner:
+        await state.clear()
+        await message.answer("Только главный администратор может назначать модераторов.")
+        return
+    forwarded = message.forward_origin.sender_user if isinstance(message.forward_origin, MessageOriginUser) else None
+    raw = (message.text or "").strip()
+    user_id = forwarded.id if forwarded else int(raw) if raw.isdigit() else None
+    if not user_id:
+        await message.answer("Перешлите сообщение пользователя или отправьте его числовой Telegram ID.")
+        return
+    if user_id in config.admin_ids:
+        await message.answer("Этот пользователь уже является главным администратором.")
+        return
+    await db.add_moderator(
+        user_id,
+        message.from_user.id,
+        username=forwarded.username if forwarded else None,
+        full_name=forwarded.full_name if forwarded else None,
+    )
+    await state.clear()
+    await message.answer(f"✅ Пользователь <code>{user_id}</code> назначен модератором.")
+    await _show_moderators(message, db, config)
+
+
+@router.callback_query(F.data.startswith("moderator:remove:"))
+async def moderator_remove(
+    callback: CallbackQuery, db: Database, config: Config, is_owner: bool
+) -> None:
+    if not is_owner:
+        await callback.answer("Только для главного администратора", show_alert=True)
+        return
+    user_id = int(callback.data.rsplit(":", 1)[1])
+    await db.remove_moderator(user_id)
+    await callback.answer("Доступ отозван")
+    await _show_moderators(callback.message, db, config)
+
+
 # ---- Settings ------------------------------------------------------------
 
 
@@ -600,5 +685,5 @@ async def settings_time_finish(message: Message, state: FSMContext, db: Database
 
 
 @router.message()
-async def fallback(message: Message) -> None:
-    await message.answer("Используйте меню управления:", reply_markup=main_menu())
+async def fallback(message: Message, is_owner: bool) -> None:
+    await message.answer("Используйте меню управления:", reply_markup=main_menu(is_owner))

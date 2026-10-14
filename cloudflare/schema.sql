@@ -40,6 +40,14 @@ CREATE TABLE IF NOT EXISTS sessions (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS moderators (
+  user_id INTEGER PRIMARY KEY,
+  username TEXT,
+  full_name TEXT,
+  added_by INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 INSERT OR IGNORE INTO settings(key, value) VALUES
   ('caption_template', '🎉 <b>Поздравляем с днём рождения!</b>\n\nСегодня день рождения отмечает <b>{name}</b> — {position}, филиал «{branch}».\n\nЖелаем крепкого здоровья, счастья, вдохновения и новых профессиональных успехов! 🎂'),
   ('publish_time', '09:00'),

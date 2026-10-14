@@ -65,6 +65,14 @@ class Database:
                     UNIQUE(birthday_id, publication_year)
                 );
 
+                CREATE TABLE IF NOT EXISTS moderators (
+                    user_id INTEGER PRIMARY KEY,
+                    username TEXT,
+                    full_name TEXT,
+                    added_by INTEGER NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_birthdays_month_day
                     ON birthdays(substr(birth_date, 6, 2), substr(birth_date, 9, 2));
                 """
@@ -80,6 +88,44 @@ class Database:
             )
             await db.execute("INSERT OR IGNORE INTO branches(name) VALUES (?)", ("Главный филиал",))
             await db.commit()
+
+    async def is_moderator(self, user_id: int) -> bool:
+        async with self.connect() as db:
+            cursor = await db.execute("SELECT 1 FROM moderators WHERE user_id = ?", (user_id,))
+            return await cursor.fetchone() is not None
+
+    async def list_moderators(self) -> list[dict[str, Any]]:
+        async with self.connect() as db:
+            cursor = await db.execute(
+                "SELECT user_id, username, full_name, created_at FROM moderators "
+                "ORDER BY COALESCE(full_name, username, CAST(user_id AS TEXT)) COLLATE NOCASE"
+            )
+            return [dict(row) for row in await cursor.fetchall()]
+
+    async def add_moderator(
+        self,
+        user_id: int,
+        added_by: int,
+        *,
+        username: str | None = None,
+        full_name: str | None = None,
+    ) -> None:
+        async with self.connect() as db:
+            await db.execute(
+                "INSERT INTO moderators(user_id, username, full_name, added_by) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(user_id) DO UPDATE SET "
+                "username = COALESCE(excluded.username, moderators.username), "
+                "full_name = COALESCE(excluded.full_name, moderators.full_name), "
+                "added_by = excluded.added_by",
+                (user_id, username, full_name, added_by),
+            )
+            await db.commit()
+
+    async def remove_moderator(self, user_id: int) -> bool:
+        async with self.connect() as db:
+            cursor = await db.execute("DELETE FROM moderators WHERE user_id = ?", (user_id,))
+            await db.commit()
+            return cursor.rowcount > 0
 
     async def get_setting(self, key: str, default: str | None = None) -> str | None:
         async with self.connect() as db:

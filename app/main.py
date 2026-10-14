@@ -29,8 +29,8 @@ async def main() -> None:
 
     bot = Bot(config.token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dispatcher = Dispatcher(storage=MemoryStorage())
-    router.message.outer_middleware(AdminOnlyMiddleware(config.admin_ids))
-    router.callback_query.outer_middleware(AdminOnlyMiddleware(config.admin_ids))
+    router.message.outer_middleware(AdminOnlyMiddleware(config.admin_ids, db))
+    router.callback_query.outer_middleware(AdminOnlyMiddleware(config.admin_ids, db))
     dispatcher.include_router(router)
 
     await bot.set_my_commands(
@@ -54,4 +54,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-

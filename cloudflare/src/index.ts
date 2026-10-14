@@ -11,6 +11,7 @@ interface Env {
   MEDIA: KVNamespace;
   BOT_TOKEN?: string;
   ADMIN_IDS?: string;
+  OWNER_ID?: string;
   WEBHOOK_SECRET?: string;
 }
 
@@ -18,7 +19,7 @@ type Row = Record<string, string | number | null>;
 type InlineButton = { text: string; callback_data: string };
 type InlineKeyboard = { inline_keyboard: InlineButton[][] };
 
-interface TgUser { id: number }
+interface TgUser { id: number; username?: string; first_name?: string; last_name?: string }
 interface TgPhoto { file_id: string; width: number; height: number }
 interface TgDocument { file_id: string; file_name?: string; mime_type?: string }
 interface TgChat { id: number; title?: string; username?: string; type?: string }
@@ -29,7 +30,7 @@ interface TgMessage {
   text?: string;
   photo?: TgPhoto[];
   document?: TgDocument;
-  forward_origin?: { type: string; chat?: TgChat };
+  forward_origin?: { type: string; chat?: TgChat; sender_user?: TgUser };
 }
 interface TgCallback {
   id: string;
@@ -44,16 +45,17 @@ const MONTHS = [
   "июля", "августа", "сентября", "октября", "ноября", "декабря",
 ];
 
-const mainMenu: InlineKeyboard = {
-  inline_keyboard: [
+function mainMenu(owner = false): InlineKeyboard {
+  return { inline_keyboard: [
     [{ text: "➕ Добавить именинника", callback_data: "menu:add" }],
     [{ text: "🎂 Именинники", callback_data: "menu:birthdays" }],
     [
       { text: "🏢 Филиалы", callback_data: "menu:branches" },
       { text: "⚙️ Настройки", callback_data: "menu:settings" },
     ],
-  ],
-};
+    ...(owner ? [[{ text: "👥 Модераторы", callback_data: "menu:moderators" }]] : []),
+  ] };
+}
 const cancelKeyboard: InlineKeyboard = {
   inline_keyboard: [[{ text: "✖️ Отмена", callback_data: "cancel" }]],
 };
@@ -69,8 +71,23 @@ function html(value: unknown): string {
     .replaceAll('"', "&quot;");
 }
 
-function adminIds(env: Env): Set<number> {
-  return new Set((env.ADMIN_IDS ?? "").split(",").map((v) => Number(v.trim())).filter(Number.isFinite));
+function ownerIds(env: Env): Set<number> {
+  const configured = [env.OWNER_ID ?? "", env.ADMIN_IDS ?? ""].join(",");
+  return new Set(configured.split(",").map((v) => Number(v.trim())).filter((v) => Number.isSafeInteger(v) && v > 0));
+}
+
+function isOwner(env: Env, userId: number): boolean {
+  return ownerIds(env).has(userId);
+}
+
+async function hasAccess(env: Env, userId: number): Promise<boolean> {
+  if (isOwner(env, userId)) return true;
+  const row = await env.DB.prepare("SELECT 1 allowed FROM moderators WHERE user_id=?").bind(userId).first<{ allowed: number }>();
+  return Boolean(row?.allowed);
+}
+
+function validBotToken(token?: string): boolean {
+  return /^\d{6,12}:[A-Za-z0-9_-]{30,}$/.test(token ?? "");
 }
 
 async function tg<T = unknown>(env: Env, method: string, payload: Record<string, unknown>): Promise<T> {
@@ -223,8 +240,36 @@ async function composeCard(env: Env, photoKey: string, templateKey: string): Pro
   }
 }
 
-async function showMain(env: Env, chatId: number): Promise<void> {
-  await sendMessage(env, chatId, "🎉 <b>Бот поздравлений</b>\n\nДобавляйте именинников, управляйте филиалами и публикациями.", mainMenu);
+async function showMain(env: Env, chatId: number, userId: number): Promise<void> {
+  const role = isOwner(env, userId) ? "главный администратор" : "модератор";
+  await sendMessage(
+    env,
+    chatId,
+    `🎉 <b>Бот поздравлений</b>\n\nРоль: <b>${role}</b>. Добавляйте именинников, управляйте филиалами и публикациями.`,
+    mainMenu(isOwner(env, userId)),
+  );
+}
+
+async function showModerators(env: Env, chatId: number): Promise<void> {
+  const result = await env.DB.prepare(
+    "SELECT user_id,username,full_name FROM moderators ORDER BY COALESCE(full_name,username,CAST(user_id AS TEXT)) COLLATE NOCASE",
+  ).all<{ user_id: number; username: string | null; full_name: string | null }>();
+  const owner = [...ownerIds(env)][0];
+  const lines = result.results.map((row) => {
+    const name = row.full_name || (row.username ? `@${row.username}` : String(row.user_id));
+    return `• <b>${html(name)}</b> — <code>${row.user_id}</code>`;
+  });
+  const keyboard: InlineKeyboard = { inline_keyboard: [
+    [{ text: "➕ Назначить модератора", callback_data: "moderator:add" }],
+    ...result.results.map((row) => [{ text: `🗑 Снять ${row.full_name || row.username || row.user_id}`, callback_data: `moderator:remove:${row.user_id}` }]),
+    [{ text: "⬅️ Назад", callback_data: "menu:main" }],
+  ] };
+  await sendMessage(
+    env,
+    chatId,
+    `👥 <b>Модераторы</b>\n\nГлавный администратор: <code>${owner ?? "не настроен"}</code>\n\n${lines.length ? lines.join("\n") : "Модераторов пока нет."}`,
+    keyboard,
+  );
 }
 
 async function branchKeyboard(env: Env, prefix: string): Promise<InlineKeyboard> {
@@ -300,8 +345,34 @@ async function handleStateMessage(env: Env, message: TgMessage, state: { state: 
     try {
       await env.DB.prepare("INSERT INTO branches(name) VALUES(?)").bind(text).run();
       await clearSession(env, adminId);
-      await sendMessage(env, chatId, "✅ Филиал добавлен.", mainMenu);
+      await sendMessage(env, chatId, "✅ Филиал добавлен.", mainMenu(isOwner(env, adminId)));
     } catch { await sendMessage(env, chatId, "Такой филиал уже существует."); }
+    return true;
+  }
+  if (state.state === "moderator_add") {
+    if (!isOwner(env, adminId)) {
+      await clearSession(env, adminId);
+      await sendMessage(env, chatId, "Только главный администратор может назначать модераторов.");
+      return true;
+    }
+    const forwarded = message.forward_origin?.type === "user" ? message.forward_origin.sender_user : undefined;
+    const targetId = forwarded?.id ?? (text && /^\d{5,15}$/.test(text) ? Number(text) : undefined);
+    if (!targetId || !Number.isSafeInteger(targetId)) {
+      await sendMessage(env, chatId, "Перешлите сообщение пользователя или отправьте его числовой Telegram ID.", cancelKeyboard);
+      return true;
+    }
+    if (isOwner(env, targetId)) {
+      await sendMessage(env, chatId, "Этот пользователь уже является главным администратором.");
+      return true;
+    }
+    const fullName = forwarded ? [forwarded.first_name, forwarded.last_name].filter(Boolean).join(" ") || null : null;
+    await env.DB.prepare(
+      "INSERT INTO moderators(user_id,username,full_name,added_by) VALUES(?,?,?,?) " +
+      "ON CONFLICT(user_id) DO UPDATE SET username=COALESCE(excluded.username,moderators.username),full_name=COALESCE(excluded.full_name,moderators.full_name),added_by=excluded.added_by",
+    ).bind(targetId, forwarded?.username ?? null, fullName, adminId).run();
+    await clearSession(env, adminId);
+    await sendMessage(env, chatId, `✅ Пользователь <code>${targetId}</code> назначен модератором.`);
+    await showModerators(env, chatId);
     return true;
   }
   if (state.state.startsWith("edit_")) {
@@ -346,7 +417,7 @@ async function handleStateMessage(env: Env, message: TgMessage, state: { state: 
       await setSetting(env, "channel_id", String(target.id));
       await setSetting(env, "channel_title", target.title ?? target.username ?? String(target.id));
       await clearSession(env, adminId);
-      await sendMessage(env, chatId, `✅ Канал «<b>${html(target.title ?? target.username ?? target.id)}</b>» сохранён.`, mainMenu);
+      await sendMessage(env, chatId, `✅ Канал «<b>${html(target.title ?? target.username ?? target.id)}</b>» сохранён.`, mainMenu(isOwner(env, adminId)));
     } catch (error) { await sendMessage(env, chatId, `Не удалось проверить канал: ${html(error)}`); }
     return true;
   }
@@ -363,7 +434,7 @@ async function handleStateMessage(env: Env, message: TgMessage, state: { state: 
       await env.MEDIA.put(key, bytes);
       await setSetting(env, "template_key", key);
       await clearSession(env, adminId);
-      await sendMessage(env, chatId, "✅ PNG-шаблон сохранён и будет применён к будущим публикациям.", mainMenu);
+      await sendMessage(env, chatId, "✅ PNG-шаблон сохранён и будет применён к будущим публикациям.", mainMenu(isOwner(env, adminId)));
     } catch (error) { await sendMessage(env, chatId, `Шаблон не принят: ${html(error)}`); }
     return true;
   }
@@ -371,7 +442,7 @@ async function handleStateMessage(env: Env, message: TgMessage, state: { state: 
     if (!text || text.length > 900 || /\{(?!name\}|position\}|branch\}|date\})/.test(text)) { await sendMessage(env, chatId, "Текст некорректен или содержит неизвестные переменные."); return true; }
     await setSetting(env, "caption_template", text);
     await clearSession(env, adminId);
-    await sendMessage(env, chatId, "✅ Текст поздравления сохранён.", mainMenu);
+    await sendMessage(env, chatId, "✅ Текст поздравления сохранён.", mainMenu(isOwner(env, adminId)));
     return true;
   }
   if (state.state === "settings_time") {
@@ -380,25 +451,25 @@ async function handleStateMessage(env: Env, message: TgMessage, state: { state: 
     const value = `${match[1].padStart(2, "0")}:${match[2]}`;
     await setSetting(env, "publish_time", value);
     await clearSession(env, adminId);
-    await sendMessage(env, chatId, `✅ Время публикации изменено на ${value}.`, mainMenu);
+    await sendMessage(env, chatId, `✅ Время публикации изменено на ${value}.`, mainMenu(isOwner(env, adminId)));
     return true;
   }
   return false;
 }
 
 async function handleMessage(env: Env, message: TgMessage): Promise<void> {
-  if (!message.from || !adminIds(env).has(message.from.id)) {
+  if (!message.from || !await hasAccess(env, message.from.id)) {
     await sendMessage(env, message.chat.id, "⛔️ У вас нет доступа к этому боту.");
     return;
   }
   if (message.text === "/start" || message.text === "/menu") {
     await clearSession(env, message.from.id);
-    await showMain(env, message.chat.id);
+    await showMain(env, message.chat.id, message.from.id);
     return;
   }
   const session = await getSession(env, message.from.id);
   if (session && await handleStateMessage(env, message, session)) return;
-  await sendMessage(env, message.chat.id, "Используйте меню управления:", mainMenu);
+  await sendMessage(env, message.chat.id, "Используйте меню управления:", mainMenu(isOwner(env, message.from.id)));
 }
 
 async function showBranches(env: Env, chatId: number): Promise<void> {
@@ -445,9 +516,24 @@ async function handleCallback(env: Env, callback: TgCallback): Promise<void> {
   const chatId = callback.message?.chat.id;
   const data = callback.data ?? "";
   if (!chatId) return;
-  if (!adminIds(env).has(callback.from.id)) { await answerCallback(env, callback.id, "Нет доступа", true); return; }
+  if (!await hasAccess(env, callback.from.id)) { await answerCallback(env, callback.id, "Нет доступа", true); return; }
+  const ownerOnly = data === "menu:moderators" || data === "moderator:add" || data.startsWith("moderator:remove:");
+  if (ownerOnly && !isOwner(env, callback.from.id)) { await answerCallback(env, callback.id, "Только для главного администратора", true); return; }
   await answerCallback(env, callback.id);
-  if (data === "cancel" || data === "menu:main") { await clearSession(env, callback.from.id); await showMain(env, chatId); return; }
+  if (data === "cancel" || data === "menu:main") { await clearSession(env, callback.from.id); await showMain(env, chatId, callback.from.id); return; }
+  if (data === "menu:moderators") { await clearSession(env, callback.from.id); await showModerators(env, chatId); return; }
+  if (data === "moderator:add") {
+    await setSession(env, callback.from.id, "moderator_add");
+    await sendMessage(env, chatId, "Перешлите сообщение будущего модератора или отправьте его числовой Telegram ID.", cancelKeyboard);
+    return;
+  }
+  if (data.startsWith("moderator:remove:")) {
+    const targetId = Number(data.split(":")[2]);
+    await env.DB.prepare("DELETE FROM moderators WHERE user_id=?").bind(targetId).run();
+    await sendMessage(env, chatId, `✅ Доступ пользователя <code>${targetId}</code> отозван.`);
+    await showModerators(env, chatId);
+    return;
+  }
   if (data === "menu:add") { await setSession(env, callback.from.id, "add_photo"); await sendMessage(env, chatId, "Шаг 1 из 5. Пришлите фотографию именинника.", cancelKeyboard); return; }
   if (data === "menu:birthdays") { await clearSession(env, callback.from.id); await sendMessage(env, chatId, "🎂 <b>Именинники</b>", { inline_keyboard: [
     [{ text: "📅 Текущий месяц", callback_data: "month:0" }],
@@ -489,7 +575,7 @@ async function handleCallback(env: Env, callback: TgCallback): Promise<void> {
   if (data.startsWith("birthday:confirm_delete:")) {
     const id = Number(data.split(":")[2]);
     await env.DB.prepare("DELETE FROM birthdays WHERE id=?").bind(id).run();
-    await sendMessage(env, chatId, "🗑 Запись удалена.", mainMenu); return;
+    await sendMessage(env, chatId, "🗑 Запись удалена.", mainMenu(isOwner(env, callback.from.id))); return;
   }
   if (data.startsWith("addbranch:")) {
     const session = await getSession(env, callback.from.id);
@@ -574,7 +660,7 @@ async function publishDue(env: Env): Promise<void> {
 }
 
 async function setupWebhook(request: Request, env: Env): Promise<Response> {
-  if (!env.BOT_TOKEN || !env.WEBHOOK_SECRET) return Response.json({ ok: false, error: "Configure BOT_TOKEN and WEBHOOK_SECRET first" }, { status: 503 });
+  if (!validBotToken(env.BOT_TOKEN) || !env.WEBHOOK_SECRET) return Response.json({ ok: false, error: "Configure a valid BOT_TOKEN and WEBHOOK_SECRET first" }, { status: 503 });
   if (request.headers.get("authorization") !== `Bearer ${env.WEBHOOK_SECRET}`) return new Response("Unauthorized", { status: 401 });
   const url = new URL(request.url);
   const result = await tg(env, "setWebhook", {
@@ -590,7 +676,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/" || url.pathname === "/health") {
-      return Response.json({ ok: true, service: "telegram-birthday-bot", configured: Boolean(env.BOT_TOKEN && env.ADMIN_IDS && env.WEBHOOK_SECRET) });
+      return Response.json({ ok: true, service: "telegram-birthday-bot", configured: Boolean(validBotToken(env.BOT_TOKEN) && ownerIds(env).size && env.WEBHOOK_SECRET) });
     }
     if (url.pathname === "/setup-webhook" && request.method === "POST") return setupWebhook(request, env);
     if (url.pathname === "/telegram" && request.method === "POST") {
