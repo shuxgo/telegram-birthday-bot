@@ -7,7 +7,7 @@ from typing import Any
 
 import aiosqlite
 
-from .utils import DEFAULT_CAPTION
+from .utils import DEFAULT_CAPTION, DEFAULT_GROUP_CAPTION
 
 
 class Database:
@@ -79,12 +79,17 @@ class Database:
             )
             defaults = {
                 "caption_template": DEFAULT_CAPTION,
+                "group_caption_template": DEFAULT_GROUP_CAPTION,
                 "publish_time": "09:00",
                 "template_path": str(default_template_path),
             }
             await db.executemany(
                 "INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)",
                 defaults.items(),
+            )
+            await db.execute(
+                "UPDATE settings SET value = ? WHERE key = 'caption_template'",
+                (DEFAULT_CAPTION,),
             )
             await db.execute("INSERT OR IGNORE INTO branches(name) VALUES (?)", ("Главный филиал",))
             await db.commit()

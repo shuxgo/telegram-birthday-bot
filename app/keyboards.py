@@ -123,6 +123,7 @@ def settings_menu() -> InlineKeyboardMarkup:
     builder.button(text="📣 Канал публикации", callback_data="settings:channel")
     builder.button(text="🖼 PNG-шаблон", callback_data="settings:template")
     builder.button(text="📝 Текст поздравления", callback_data="settings:caption")
+    builder.button(text="👥 Общий текст для группы", callback_data="settings:group_caption")
     builder.button(text="⏰ Время публикации", callback_data="settings:time")
     builder.button(text="⬅️ Назад", callback_data="menu:main")
     builder.adjust(1)

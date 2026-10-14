@@ -41,20 +41,12 @@ from .utils import (
     parse_publish_time,
     render_caption,
     validate_caption_template,
+    validate_group_caption_template,
 )
 
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin")
-
-
-def _birthday_summary(row: dict[str, Any]) -> str:
-    return (
-        f"<b>{html.escape(str(row['name']))}</b>\n"
-        f"📅 {display_birth_date(str(row['birth_date']))}\n"
-        f"💼 {html.escape(str(row['position']))}\n"
-        f"🏢 {html.escape(str(row['branch_name']))}"
-    )
 
 
 async def _show_main(target: Message, is_owner: bool) -> None:
@@ -73,20 +65,18 @@ async def _show_birthday(message: Message, birthday_id: int, db: Database, confi
         return
     settings = await db.get_settings()
     preview_path = config.data_dir / "cards" / f"preview-{birthday_id}.jpg"
+    caption = render_caption(settings["caption_template"], row)
     try:
         render_card(Path(row["photo_path"]), Path(settings["template_path"]), preview_path)
         await message.answer_photo(
             FSInputFile(preview_path),
-            caption=_birthday_summary(row),
+            caption=caption,
             reply_markup=birthday_card(birthday_id),
-        )
-        await message.answer(
-            "<b>Текст будущего поста:</b>\n" + render_caption(settings["caption_template"], row)
         )
     except Exception:
         logger.exception("Could not render preview for birthday %s", birthday_id)
         await message.answer(
-            _birthday_summary(row) + "\n\n⚠️ Не удалось собрать открытку. Проверьте фото и PNG-шаблон.",
+            caption + "\n\n⚠️ Не удалось собрать открытку. Проверьте фото и PNG-шаблон.",
             reply_markup=birthday_card(birthday_id),
         )
 
@@ -658,6 +648,35 @@ async def settings_caption_finish(message: Message, state: FSMContext, db: Datab
     await db.set_setting("caption_template", message.text)
     await state.clear()
     await message.answer("✅ Текст поздравления сохранён.", reply_markup=settings_menu())
+
+
+@router.callback_query(F.data == "settings:group_caption")
+async def settings_group_caption_start(
+    callback: CallbackQuery, state: FSMContext, db: Database
+) -> None:
+    current = await db.get_setting("group_caption_template", "")
+    await state.set_state(SettingValue.group_caption)
+    await callback.answer()
+    await callback.message.answer(
+        "Отправьте общий текст для 2–9 именинников. Обязательная переменная: "
+        "<code>{people}</code>; также доступна <code>{count}</code>.\n\n"
+        f"<b>Текущий шаблон:</b>\n{html.escape(current)}",
+        reply_markup=cancel_keyboard(),
+    )
+
+
+@router.message(SettingValue.group_caption, F.text)
+async def settings_group_caption_finish(
+    message: Message, state: FSMContext, db: Database
+) -> None:
+    try:
+        validate_group_caption_template(message.text)
+    except ValueError as exc:
+        await message.answer(str(exc))
+        return
+    await db.set_setting("group_caption_template", message.text)
+    await state.clear()
+    await message.answer("✅ Общий текст для нескольких именинников сохранён.", reply_markup=settings_menu())
 
 
 @router.callback_query(F.data == "settings:time")

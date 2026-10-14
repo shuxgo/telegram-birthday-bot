@@ -6,12 +6,12 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
-from aiogram.types import FSInputFile
+from aiogram.types import FSInputFile, InputMediaPhoto
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from .database import Database
 from .image_service import render_card
-from .utils import render_caption
+from .utils import DEFAULT_GROUP_CAPTION, render_caption, render_group_caption
 
 
 logger = logging.getLogger(__name__)
@@ -37,27 +37,48 @@ class BirthdayPublisher:
             return
 
         birthdays = await self.db.list_due_birthdays(now)
-        for birthday in birthdays:
+        for start in range(0, len(birthdays), 9):
+            batch = birthdays[start : start + 9]
             try:
-                output = self.data_dir / "cards" / f"birthday-{birthday['id']}-{now.year}.jpg"
                 overlay_path = Path(settings["template_path"])
-                render_card(Path(birthday["photo_path"]), overlay_path, output)
-                caption = render_caption(settings["caption_template"], birthday)
-                await self.bot.send_photo(
-                    chat_id=int(channel_id) if channel_id.lstrip("-").isdigit() else channel_id,
-                    photo=FSInputFile(output),
-                    caption=caption,
+                outputs: list[Path] = []
+                for birthday in batch:
+                    output = self.data_dir / "cards" / f"birthday-{birthday['id']}-{now.year}.jpg"
+                    render_card(Path(birthday["photo_path"]), overlay_path, output)
+                    outputs.append(output)
+                caption = (
+                    render_caption(settings["caption_template"], batch[0])
+                    if len(batch) == 1
+                    else render_group_caption(
+                        settings.get("group_caption_template", DEFAULT_GROUP_CAPTION), batch
+                    )
                 )
-                await self.db.record_publication(
-                    int(birthday["id"]), now.year, channel_id, success=True
-                )
-                logger.info("Published birthday %s to %s", birthday["id"], channel_id)
+                target = int(channel_id) if channel_id.lstrip("-").isdigit() else channel_id
+                if len(batch) == 1:
+                    await self.bot.send_photo(
+                        chat_id=target, photo=FSInputFile(outputs[0]), caption=caption
+                    )
+                else:
+                    media = [
+                        InputMediaPhoto(
+                            media=FSInputFile(output),
+                            caption=caption if index == 0 else None,
+                        )
+                        for index, output in enumerate(outputs)
+                    ]
+                    await self.bot.send_media_group(chat_id=target, media=media)
+                for birthday in batch:
+                    await self.db.record_publication(
+                        int(birthday["id"]), now.year, channel_id, success=True
+                    )
+                logger.info("Published birthday batch %s to %s", [row["id"] for row in batch], channel_id)
             except Exception as exc:
-                logger.exception("Could not publish birthday %s", birthday["id"])
-                await self.db.record_publication(
-                    int(birthday["id"]), now.year, channel_id,
-                    success=False, error=str(exc)[:1000],
-                )
+                logger.exception("Could not publish birthday batch %s", [row["id"] for row in batch])
+                for birthday in batch:
+                    await self.db.record_publication(
+                        int(birthday["id"]), now.year, channel_id,
+                        success=False, error=str(exc)[:1000],
+                    )
 
     def start(self) -> None:
         self.scheduler.add_job(

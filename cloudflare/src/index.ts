@@ -45,6 +45,11 @@ const MONTHS = [
   "июля", "августа", "сентября", "октября", "ноября", "декабря",
 ];
 
+const DEFAULT_GROUP_CAPTION =
+  "🎉 <b>Поздравляем наших именинников!</b>\n\n" +
+  "Сегодня день рождения отмечают:\n\n{people}\n\n" +
+  "Желаем крепкого здоровья, счастья, вдохновения и ярких профессиональных побед! 🎂";
+
 function mainMenu(owner = false): InlineKeyboard {
   return { inline_keyboard: [
     [{ text: "➕ Добавить именинника", callback_data: "menu:add" }],
@@ -138,6 +143,33 @@ async function sendPhotoBytes(env: Env, chatId: number | string, bytes: Uint8Arr
   if (!body.ok) throw new Error(body.description ?? "Telegram sendPhoto failed");
 }
 
+async function sendMediaGroupBytes(
+  env: Env,
+  chatId: number | string,
+  photos: Uint8Array[],
+  caption: string,
+): Promise<void> {
+  if (!env.BOT_TOKEN) throw new Error("BOT_TOKEN is not configured");
+  if (photos.length < 2 || photos.length > 9) throw new Error("Media group must contain from 2 to 9 photos");
+  const form = new FormData();
+  form.set("chat_id", String(chatId));
+  form.set("media", JSON.stringify(photos.map((_, index) => ({
+    type: "photo",
+    media: `attach://photo${index}`,
+    ...(index === 0 ? { caption, parse_mode: "HTML" } : {}),
+  }))));
+  photos.forEach((bytes, index) => {
+    const arrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    form.set(`photo${index}`, new Blob([arrayBuffer], { type: "image/jpeg" }), `birthday-${index + 1}.jpg`);
+  });
+  const response = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMediaGroup`, {
+    method: "POST",
+    body: form,
+  });
+  const body = await response.json<{ ok: boolean; description?: string }>();
+  if (!body.ok) throw new Error(body.description ?? "Telegram sendMediaGroup failed");
+}
+
 async function answerCallback(env: Env, callbackId: string, text?: string, alert = false): Promise<void> {
   await tg(env, "answerCallbackQuery", {
     callback_query_id: callbackId,
@@ -192,15 +224,32 @@ function displayDate(iso: string): string {
 }
 
 function renderCaption(template: string, row: Row): string {
-  return template
+  return template.replaceAll("\\n", "\n")
     .replaceAll("{name}", html(row.name))
     .replaceAll("{position}", html(row.position))
     .replaceAll("{branch}", html(row.branch_name))
     .replaceAll("{date}", displayDate(String(row.birth_date)));
 }
 
-function birthdaySummary(row: Row): string {
-  return `<b>${html(row.name)}</b>\n📅 ${displayDate(String(row.birth_date))}\n💼 ${html(row.position)}\n🏢 ${html(row.branch_name)}`;
+function compact(value: unknown, limit: number): string {
+  const text = String(value ?? "").trim();
+  return text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;
+}
+
+function renderGroupCaption(template: string, rows: Row[]): string {
+  const people = rows.map((row, index) => (
+    `${index + 1}. <b>${html(compact(row.name, 36))}</b> — ` +
+    `${html(compact(row.position, 28))} · ${html(compact(row.branch_name, 22))}`
+  )).join("\n");
+  let caption = template.replaceAll("\\n", "\n")
+    .replaceAll("{people}", people)
+    .replaceAll("{count}", String(rows.length));
+  if (caption.length <= 1000) return caption;
+
+  const namesOnly = rows.map((row, index) => `${index + 1}. <b>${html(compact(row.name, 55))}</b>`).join("\n");
+  caption = `🎉 <b>Поздравляем наших именинников!</b>\n\n${namesOnly}\n\n` +
+    "Желаем здоровья, счастья, вдохновения и ярких профессиональных побед! 🎂";
+  return caption;
 }
 
 async function downloadTelegramFile(env: Env, fileId: string): Promise<Uint8Array> {
@@ -296,13 +345,13 @@ async function showBirthday(env: Env, chatId: number, id: number): Promise<void>
     [{ text: "⬅️ К спискам", callback_data: "menu:birthdays" }],
   ] };
   const config = await settings(env);
+  const caption = renderCaption(config.caption_template, row);
   try {
     const card = await composeCard(env, String(row.photo_key), config.template_key);
-    await sendPhotoBytes(env, chatId, card, birthdaySummary(row), keyboard);
+    await sendPhotoBytes(env, chatId, card, caption, keyboard);
   } catch {
-    await sendPhotoFile(env, chatId, String(row.photo_file_id), birthdaySummary(row), keyboard);
+    await sendPhotoFile(env, chatId, String(row.photo_file_id), caption, keyboard);
   }
-  await sendMessage(env, chatId, "<b>Текст будущего поста:</b>\n" + renderCaption(config.caption_template, row));
 }
 
 async function handleStateMessage(env: Env, message: TgMessage, state: { state: string; data: Record<string, unknown> }): Promise<boolean> {
@@ -443,6 +492,16 @@ async function handleStateMessage(env: Env, message: TgMessage, state: { state: 
     await setSetting(env, "caption_template", text);
     await clearSession(env, adminId);
     await sendMessage(env, chatId, "✅ Текст поздравления сохранён.", mainMenu(isOwner(env, adminId)));
+    return true;
+  }
+  if (state.state === "settings_group_caption") {
+    if (!text || text.length > 900 || /\{(?!people\}|count\})/.test(text) || !text.includes("{people}")) {
+      await sendMessage(env, chatId, "Общий текст должен содержать {people}; доступна также переменная {count}.");
+      return true;
+    }
+    await setSetting(env, "group_caption_template", text);
+    await clearSession(env, adminId);
+    await sendMessage(env, chatId, "✅ Общий текст для нескольких именинников сохранён.", mainMenu(isOwner(env, adminId)));
     return true;
   }
   if (state.state === "settings_time") {
@@ -604,6 +663,7 @@ async function handleCallback(env: Env, callback: TgCallback): Promise<void> {
       [{ text: "📣 Канал публикации", callback_data: "settings:channel" }],
       [{ text: "🖼 PNG-шаблон", callback_data: "settings:template" }],
       [{ text: "📝 Текст поздравления", callback_data: "settings:caption" }],
+      [{ text: "👥 Общий текст для группы", callback_data: "settings:group_caption" }],
       [{ text: "⏰ Время публикации", callback_data: "settings:time" }],
       [{ text: "⬅️ Назад", callback_data: "menu:main" }],
     ] }); return;
@@ -615,6 +675,7 @@ async function handleCallback(env: Env, callback: TgCallback): Promise<void> {
       channel: "Перешлите пост из канала или отправьте @username / -100… Бот должен быть администратором.",
       template: "Пришлите прозрачный PNG <b>как документ</b>. Рекомендуемый размер 1080×1080.",
       caption: "Отправьте текст. Переменные: <code>{name}</code>, <code>{position}</code>, <code>{branch}</code>, <code>{date}</code>.",
+      group_caption: "Отправьте общий текст для 2–9 именинников. Обязательная переменная: <code>{people}</code>; также доступна <code>{count}</code>.",
       time: "Введите время публикации в формате ЧЧ:ММ.",
     };
     await sendMessage(env, chatId, prompts[kind], cancelKeyboard);
@@ -640,21 +701,27 @@ async function publishDue(env: Env): Promise<void> {
     "SELECT bd.*,b.name branch_name,pl.status,COALESCE(pl.attempt_count,0) attempts FROM birthdays bd JOIN branches b ON b.id=bd.branch_id " +
     "LEFT JOIN publication_log pl ON pl.birthday_id=bd.id AND pl.publication_year=? " +
     "WHERE CAST(substr(bd.birth_date,6,2) AS INTEGER)=? AND CAST(substr(bd.birth_date,9,2) AS INTEGER)=? " +
-    "AND (pl.birthday_id IS NULL OR (pl.status='failed' AND pl.attempt_count<10 AND datetime(pl.last_attempt)<=datetime('now','-15 minutes')))",
+    "AND (pl.birthday_id IS NULL OR (pl.status='failed' AND pl.attempt_count<10 AND datetime(pl.last_attempt)<=datetime('now','-15 minutes'))) " +
+    "ORDER BY bd.id",
   ).bind(now.year, now.month, now.day).all<Row>();
-  for (const row of result.results) {
+  for (let index = 0; index < result.results.length; index += 9) {
+    const batch = result.results.slice(index, index + 9);
     try {
-      const card = await composeCard(env, String(row.photo_key), config.template_key);
-      await sendPhotoBytes(env, config.channel_id, card, renderCaption(config.caption_template, row));
-      await env.DB.prepare(
+      const cards = await Promise.all(batch.map((row) => composeCard(env, String(row.photo_key), config.template_key)));
+      const caption = batch.length === 1
+        ? renderCaption(config.caption_template, batch[0])
+        : renderGroupCaption(config.group_caption_template ?? DEFAULT_GROUP_CAPTION, batch);
+      if (batch.length === 1) await sendPhotoBytes(env, config.channel_id, cards[0], caption);
+      else await sendMediaGroupBytes(env, config.channel_id, cards, caption);
+      await env.DB.batch(batch.map((row) => env.DB.prepare(
         "INSERT INTO publication_log(birthday_id,publication_year,channel_id,status,published_at) VALUES(?,?,?,'published',CURRENT_TIMESTAMP) " +
         "ON CONFLICT(birthday_id,publication_year) DO UPDATE SET status='published',published_at=CURRENT_TIMESTAMP,error=NULL,last_attempt=CURRENT_TIMESTAMP,attempt_count=publication_log.attempt_count+1",
-      ).bind(row.id, now.year, config.channel_id).run();
+      ).bind(row.id, now.year, config.channel_id)));
     } catch (error) {
-      await env.DB.prepare(
+      await env.DB.batch(batch.map((row) => env.DB.prepare(
         "INSERT INTO publication_log(birthday_id,publication_year,channel_id,status,error) VALUES(?,?,?,'failed',?) " +
         "ON CONFLICT(birthday_id,publication_year) DO UPDATE SET status='failed',error=excluded.error,last_attempt=CURRENT_TIMESTAMP,attempt_count=publication_log.attempt_count+1",
-      ).bind(row.id, now.year, config.channel_id, String(error).slice(0, 1000)).run();
+      ).bind(row.id, now.year, config.channel_id, String(error).slice(0, 1000))));
     }
   }
 }

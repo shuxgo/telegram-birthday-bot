@@ -13,12 +13,22 @@ MONTHS_RU = (
 
 DEFAULT_CAPTION = (
     "🎉 <b>Поздравляем с днём рождения!</b>\n\n"
-    "Сегодня день рождения отмечает <b>{name}</b> — {position}, "
-    "филиал «{branch}».\n\n"
-    "Желаем крепкого здоровья, счастья, вдохновения и новых профессиональных успехов! 🎂"
+    "Сегодня свой день рождения отмечает:\n\n"
+    "<b>{name}</b>\n"
+    "💼 {position}\n"
+    "🏢 Филиал «{branch}»\n\n"
+    "Желаем крепкого здоровья, счастья, вдохновения и ярких профессиональных побед! 🎂"
+)
+
+DEFAULT_GROUP_CAPTION = (
+    "🎉 <b>Поздравляем наших именинников!</b>\n\n"
+    "Сегодня день рождения отмечают:\n\n"
+    "{people}\n\n"
+    "Желаем крепкого здоровья, счастья, вдохновения и ярких профессиональных побед! 🎂"
 )
 
 ALLOWED_PLACEHOLDERS = {"name", "position", "branch", "date"}
+ALLOWED_GROUP_PLACEHOLDERS = {"people", "count"}
 
 
 def parse_birth_date(value: str) -> date:
@@ -55,6 +65,20 @@ def validate_caption_template(template: str) -> None:
         raise ValueError("Не удалось обработать шаблон") from exc
 
 
+def validate_group_caption_template(template: str) -> None:
+    if len(template) > 900:
+        raise ValueError("Шаблон слишком длинный — максимум 900 символов")
+    try:
+        fields = {field for _, field, _, _ in string.Formatter().parse(template) if field}
+    except ValueError as exc:
+        raise ValueError("Проверьте парные фигурные скобки") from exc
+    unknown = fields - ALLOWED_GROUP_PLACEHOLDERS
+    if unknown:
+        raise ValueError(f"Неизвестные переменные: {', '.join(sorted(unknown))}")
+    if "people" not in fields:
+        raise ValueError("Добавьте обязательную переменную {people}")
+
+
 def render_caption(template: str, birthday: dict) -> str:
     values = {
         "name": html.escape(str(birthday["name"])),
@@ -62,7 +86,34 @@ def render_caption(template: str, birthday: dict) -> str:
         "branch": html.escape(str(birthday["branch_name"])),
         "date": display_birth_date(str(birthday["birth_date"])),
     }
-    return template.format_map(values)
+    return template.replace("\\n", "\n").format_map(values)
+
+
+def _compact(value: object, limit: int) -> str:
+    text = str(value or "").strip()
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def render_group_caption(template: str, birthdays: list[dict]) -> str:
+    people = "\n".join(
+        f"{index}. <b>{html.escape(_compact(row['name'], 36))}</b> — "
+        f"{html.escape(_compact(row['position'], 28))} · "
+        f"{html.escape(_compact(row['branch_name'], 22))}"
+        for index, row in enumerate(birthdays, start=1)
+    )
+    caption = template.replace("\\n", "\n").format_map(
+        {"people": people, "count": len(birthdays)}
+    )
+    if len(caption) <= 1000:
+        return caption
+    names = "\n".join(
+        f"{index}. <b>{html.escape(_compact(row['name'], 55))}</b>"
+        for index, row in enumerate(birthdays, start=1)
+    )
+    return (
+        f"🎉 <b>Поздравляем наших именинников!</b>\n\n{names}\n\n"
+        "Желаем здоровья, счастья, вдохновения и ярких профессиональных побед! 🎂"
+    )
 
 
 def parse_publish_time(value: str) -> str:
@@ -78,4 +129,3 @@ def parse_publish_time(value: str) -> str:
 def month_bounds(now: datetime, offset: int = 0) -> tuple[int, int]:
     month_index = now.year * 12 + now.month - 1 + offset
     return month_index // 12, month_index % 12 + 1
-

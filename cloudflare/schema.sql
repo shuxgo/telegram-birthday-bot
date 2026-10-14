@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS moderators (
 );
 
 INSERT OR IGNORE INTO settings(key, value) VALUES
-  ('caption_template', '🎉 <b>Поздравляем с днём рождения!</b>\n\nСегодня день рождения отмечает <b>{name}</b> — {position}, филиал «{branch}».\n\nЖелаем крепкого здоровья, счастья, вдохновения и новых профессиональных успехов! 🎂'),
+  ('caption_template', '🎉 <b>Поздравляем с днём рождения!</b>\n\nСегодня свой день рождения отмечает:\n\n<b>{name}</b>\n💼 {position}\n🏢 Филиал «{branch}»\n\nЖелаем крепкого здоровья, счастья, вдохновения и ярких профессиональных побед! 🎂'),
+  ('group_caption_template', '🎉 <b>Поздравляем наших именинников!</b>\n\nСегодня день рождения отмечают:\n\n{people}\n\nЖелаем крепкого здоровья, счастья, вдохновения и ярких профессиональных побед! 🎂'),
   ('publish_time', '09:00'),
   ('timezone', 'Asia/Tashkent'),
   ('template_key', 'templates/default.png');

@@ -25,4 +25,5 @@ class SettingValue(StatesGroup):
     channel = State()
     template = State()
     caption = State()
+    group_caption = State()
     publish_time = State()

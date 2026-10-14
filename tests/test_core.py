@@ -9,7 +9,14 @@ from PIL import Image
 
 from app.database import Database
 from app.image_service import ensure_default_template, render_card, validate_overlay
-from app.utils import month_bounds, parse_birth_date, parse_publish_time, render_caption
+from app.utils import (
+    DEFAULT_GROUP_CAPTION,
+    month_bounds,
+    parse_birth_date,
+    parse_publish_time,
+    render_caption,
+    render_group_caption,
+)
 
 
 class DateTests(unittest.TestCase):
@@ -46,6 +53,32 @@ class CaptionTests(unittest.TestCase):
         )
         self.assertIn("A &lt; B", caption)
         self.assertIn("R&amp;D", caption)
+
+    def test_escaped_newlines_are_rendered_as_paragraphs(self) -> None:
+        caption = render_caption(
+            "Заголовок\\n\\n<b>{name}</b>",
+            {
+                "name": "Анна",
+                "position": "специалист",
+                "branch_name": "Центр",
+                "birth_date": "2000-01-02",
+            },
+        )
+        self.assertEqual(caption, "Заголовок\n\n<b>Анна</b>")
+
+    def test_group_caption_lists_nine_people_within_telegram_limit(self) -> None:
+        rows = [
+            {
+                "name": f"Сотрудник {index}",
+                "position": "ведущий специалист",
+                "branch_name": "Главный филиал",
+                "birth_date": "2000-01-02",
+            }
+            for index in range(1, 10)
+        ]
+        caption = render_group_caption(DEFAULT_GROUP_CAPTION, rows)
+        self.assertIn("9. <b>Сотрудник 9</b>", caption)
+        self.assertLessEqual(len(caption), 1000)
 
 
 class ImageTests(unittest.TestCase):
