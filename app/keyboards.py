@@ -40,12 +40,13 @@ def back_to_menu() -> InlineKeyboardMarkup:
 
 
 def branch_picker(branches: list[dict[str, Any]], prefix: str) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    for branch in branches:
-        builder.button(text=f"🏢 {branch['name']}", callback_data=f"{prefix}:{branch['id']}")
-    builder.button(text="✖️ Отмена", callback_data="cancel")
-    builder.adjust(1)
-    return builder.as_markup()
+    buttons = [
+        InlineKeyboardButton(text=f"🏢 {branch['name']}", callback_data=f"{prefix}:{branch['id']}")
+        for branch in branches
+    ]
+    rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+    rows.append([InlineKeyboardButton(text="✖️ Отмена", callback_data="cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def birthdays_menu() -> InlineKeyboardMarkup:
@@ -128,16 +129,17 @@ def delete_confirmation(birthday_id: int) -> InlineKeyboardMarkup:
 
 
 def branches_menu(branches: list[dict[str, Any]]) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(text="➕ Добавить филиал", callback_data="branch:add")
-    for branch in branches:
-        builder.button(
+    rows = [[InlineKeyboardButton(text="➕ Добавить филиал", callback_data="branch:add")]]
+    buttons = [
+        InlineKeyboardButton(
             text=f"🗑 {branch['name']} ({branch['birthday_count']})",
             callback_data=f"branch:delete:{branch['id']}",
         )
-    builder.button(text="⬅️ В настройки", callback_data="menu:settings")
-    builder.adjust(1)
-    return builder.as_markup()
+        for branch in branches
+    ]
+    rows.extend(buttons[index:index + 2] for index in range(0, len(buttons), 2))
+    rows.append([InlineKeyboardButton(text="⬅️ В настройки", callback_data="menu:settings")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def settings_menu() -> InlineKeyboardMarkup:

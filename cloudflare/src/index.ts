@@ -51,6 +51,18 @@ const MONTHS = [
   "июля", "августа", "сентября", "октября", "ноября", "декабря",
 ];
 
+const BRANCH_ORDER = [
+  "Головной (Ташкент)", "Алмалык", "Янги Хаёт", "Бука", "Ангрен",
+  "Янгиюль", "Юнусабад", "Гулистан", "Ахангаран", "Бекабад",
+  "Янгибозор", "Навои", "Сырдарья", "Ургенч", "Бухара", "Чирчик",
+  "Зарафшан", "Авиасозлар", "Жондор", "Каган", "Нукус", "Учкудук",
+  "Ромитан", "Янгийер", "Зафар", "Гиждувон", "Газалкент", "Паркент",
+  "Ургут", "Пахтачи", "Бувайда", "Каттакурган", "Мангыт", "ТТЗ",
+  "Джизак", "Гурлен", "Шават", "Сергели", "Фергана", "Андижан",
+  "Коканд", "Термез", "Шахрихон", "Алмазар",
+];
+const BRANCH_RANK = new Map(BRANCH_ORDER.map((name, index) => [name, index]));
+
 const DEFAULT_GROUP_CAPTION =
   "🎉 Поздравляем с днём рождения [Список]!\n\n" +
   "Желаем крепкого здоровья, благополучия, вдохновения и новых успехов! 💙";
@@ -79,6 +91,23 @@ function html(value: unknown): string {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function orderedBranches(rows: Row[]): Row[] {
+  return [...rows].sort((left, right) => {
+    const leftRank = BRANCH_RANK.get(String(left.name));
+    const rightRank = BRANCH_RANK.get(String(right.name));
+    if (leftRank !== undefined || rightRank !== undefined) {
+      return (leftRank ?? BRANCH_ORDER.length) - (rightRank ?? BRANCH_ORDER.length);
+    }
+    return String(left.name).localeCompare(String(right.name), "ru");
+  });
+}
+
+function buttonPairs(buttons: InlineButton[]): InlineButton[][] {
+  const rows: InlineButton[][] = [];
+  for (let index = 0; index < buttons.length; index += 2) rows.push(buttons.slice(index, index + 2));
+  return rows;
 }
 
 function ownerIds(env: Env): Set<number> {
@@ -339,10 +368,14 @@ async function showModerators(env: Env, chatId: number): Promise<void> {
 }
 
 async function branchKeyboard(env: Env, prefix: string): Promise<InlineKeyboard> {
-  const result = await env.DB.prepare("SELECT id,name FROM branches ORDER BY name COLLATE NOCASE").all<Row>();
+  const result = await env.DB.prepare("SELECT id,name FROM branches").all<Row>();
+  const buttons = orderedBranches(result.results).map((row) => ({
+    text: `🏢 ${row.name}`,
+    callback_data: `${prefix}:${row.id}`,
+  }));
   return {
     inline_keyboard: [
-      ...result.results.map((row) => [{ text: `🏢 ${row.name}`, callback_data: `${prefix}:${row.id}` }]),
+      ...buttonPairs(buttons),
       [{ text: "✖️ Отмена", callback_data: "cancel" }],
     ],
   };
@@ -602,11 +635,15 @@ async function handleMessage(env: Env, message: TgMessage): Promise<void> {
 
 async function showBranches(env: Env, chatId: number): Promise<void> {
   const result = await env.DB.prepare(
-    "SELECT b.id,b.name,COUNT(bd.id) count FROM branches b LEFT JOIN birthdays bd ON bd.branch_id=b.id GROUP BY b.id ORDER BY b.name",
+    "SELECT b.id,b.name,COUNT(bd.id) count FROM branches b LEFT JOIN birthdays bd ON bd.branch_id=b.id GROUP BY b.id",
   ).all<Row>();
+  const buttons = orderedBranches(result.results).map((row) => ({
+    text: `🗑 ${row.name} (${row.count})`,
+    callback_data: `branch:delete:${row.id}`,
+  }));
   const keyboard: InlineKeyboard = { inline_keyboard: [
     [{ text: "➕ Добавить филиал", callback_data: "branch:add" }],
-    ...result.results.map((r) => [{ text: `🗑 ${r.name} (${r.count})`, callback_data: `branch:delete:${r.id}` }]),
+    ...buttonPairs(buttons),
     [{ text: "⬅️ В настройки", callback_data: "menu:settings" }],
   ] };
   await sendMessage(env, chatId, "🏢 <b>Филиалы</b>\n\nФилиал с именинниками удалить нельзя.", keyboard);

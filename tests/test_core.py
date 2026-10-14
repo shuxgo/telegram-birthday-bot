@@ -9,7 +9,7 @@ from PIL import Image
 
 from app.database import Database
 from app.image_service import ensure_default_template, render_card, validate_overlay
-from app.keyboards import birthday_card, birthday_days, main_menu, settings_menu
+from app.keyboards import branch_picker, branches_menu, birthday_card, birthday_days, main_menu, settings_menu
 from app.utils import (
     DEFAULT_GROUP_CAPTION,
     month_bounds,
@@ -123,6 +123,16 @@ class KeyboardTests(unittest.TestCase):
         ]
         self.assertIn("menu:branches", callbacks)
 
+    def test_branch_keyboards_use_two_columns(self) -> None:
+        branches = [
+            {"id": index, "name": f"Филиал {index}", "birthday_count": 0}
+            for index in range(1, 5)
+        ]
+        picker = branch_picker(branches, "addbranch")
+        self.assertEqual([len(row) for row in picker.inline_keyboard], [2, 2, 1])
+        management = branches_menu(branches)
+        self.assertEqual([len(row) for row in management.inline_keyboard], [1, 2, 2, 1])
+
     def test_month_view_groups_birthdays_by_day(self) -> None:
         keyboard = birthday_days(
             [
@@ -156,7 +166,11 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             await db.initialize(overlay)
             branches = await db.list_branches()
             self.assertEqual(len(branches), 44)
-            self.assertIn("Головной (Ташкент)", {row["name"] for row in branches})
+            self.assertEqual(
+                [row["name"] for row in branches[:5]],
+                ["Головной (Ташкент)", "Алмалык", "Янги Хаёт", "Бука", "Ангрен"],
+            )
+            self.assertEqual(branches[-1]["name"], "Алмазар")
 
     async def test_moderator_access_can_be_added_and_removed(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

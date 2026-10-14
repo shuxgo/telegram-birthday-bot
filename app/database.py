@@ -188,10 +188,12 @@ class Database:
                 FROM branches b
                 LEFT JOIN birthdays bd ON bd.branch_id = b.id AND bd.active = 1
                 GROUP BY b.id, b.name
-                ORDER BY b.name COLLATE NOCASE
                 """
             )
-            return [dict(row) for row in await cursor.fetchall()]
+            rows = [dict(row) for row in await cursor.fetchall()]
+            rank = {name: index for index, name in enumerate(DEFAULT_BRANCHES)}
+            rows.sort(key=lambda row: (rank.get(str(row["name"]), len(rank)), str(row["name"]).casefold()))
+            return rows
 
     async def add_branch(self, name: str) -> int:
         async with self.connect() as db:
